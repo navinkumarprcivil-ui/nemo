@@ -24,7 +24,7 @@ Website source lives in GitHub on `main`. Build with `npm run build`; deploy the
 - Smart search (typo/synonym/plural tolerant — "beta"→Betta). Aqua Tools page (fish compatibility checker + tank/heater/filter/stocking calculators).
 - Interactive UI: 3D card tilt+spotlight, magnetic CTAs, fly-to-cart, reveal-on-scroll, staggered grids, spring-count prices.
 - Mini-cart drawer + Zepto-style floating cart bar (free-delivery nudge).
-- Abandoned-cart recovery: cart persists across sessions (localStorage); a signed-in shopper's open cart syncs to Firebase (`abandonedCarts/<uid>`) and shows in Admin → Orders with a one-tap WhatsApp nudge + Dismiss. **Requires publishing the updated `database.rules.json`** (new `abandonedCarts` node) or writes are denied and the list stays empty.
+- Abandoned-cart recovery: cart persists across sessions (localStorage); a signed-in shopper's open cart syncs to Firebase (`abandonedCarts/<uid>`) and shows in Admin → Orders with a one-tap WhatsApp nudge + Dismiss. The `abandonedCarts` node is covered by the rules published 7 Sept 2026.
 - Flipkart-style rating: tap-to-rate in order list + per-aspect ratings (condition/packing/delivery/value).
 - Cinematic splash (wordmark logo, bubbles). Ambient fish-canvas wallpaper (betta+clownfish desktop-only, snails+bubbles everywhere).
 - PWA store-ready: manifest (id, screenshots, shortcuts, categories), `/.well-known/assetlinks.json` (pkg `in.nemoaquastore.app`), `/privacy.html`.
@@ -44,7 +44,7 @@ Package: `in.nemoaquastore.app`. The app is now a native Android **WebView** wra
 - **Store listing** written (name, short desc, full desc), category Shopping, contact details. Feature graphic (1024×500) + share banner made by user. App icon = `assets/favicon-512.png`.
 - **Reviewer demo login**: sign-in screen has a sandboxed demo mode (PR #15). Reviewer instructions given in Play "Sign-in details".
 - `/delete-account.html` live (required Delete-account URL for Data safety).
-- **In-app "Delete my account" + admin deletion panel — MERGED to `main` (PR #18).** Account screen → danger card (tick-to-confirm) wipes the customer's reachable cloud data (saved items, abandoned cart, own tank photos), logs an **Account deletion request** in Admin → Requests (badged), and signs the user out. Orders/payment records retained (tax law). Admin → Requests shows it in red with one-tap "Delete remaining data" (wallet/loyalty coins + referral mapping) + WhatsApp "Confirm to customer". Demo/review sessions just clear + sign out. **⚠ REQUIRES publishing the updated `database.rules.json`** (grants admin uid delete access to `favorites` + `userrefs` so the one-tap purge is complete) — Firebase console → Realtime Database → Rules.
+- **In-app "Delete my account" + admin deletion panel — MERGED to `main` (PR #18).** Account screen → danger card (tick-to-confirm) wipes the customer's reachable cloud data (saved items, abandoned cart, own tank photos), logs an **Account deletion request** in Admin → Requests (badged), and signs the user out. Orders/payment records retained (tax law). Admin → Requests shows it in red with one-tap "Delete remaining data" (wallet/loyalty coins + referral mapping) + WhatsApp "Confirm to customer". Demo/review sessions just clear + sign out. Rules published 7 Sept 2026: the admin uid has delete access to `favorites` + `userrefs`, so the one-tap purge is complete.
 
 **"Get it on Google Play" badges on the website — DONE ✅**
 Now that the app is live, the site points customers at it in three places, all sharing one `.gp-badge` style block (defined in `index.html` so the top banner can use it before React mounts):
@@ -115,7 +115,7 @@ One product, several variations, each with **its own price and packing weight** 
   - Cart quantity is capped by the **chosen option's** stock, not the product-wide pool.
   - Checkout decrements the option's counter and the product total together, each under its own atomic transaction. Cancel/restock reverses both. Transactions abort on products that have no per-option map, so those can't accidentally sprout one.
   - **Backward compatible**: products with no `variantStock` keep the single shared pool they've always used. Nothing changes until you type per-option numbers.
-  - **⚠ REQUIRES publishing the updated `database.rules.json`** — new `products/$id/variantStock/$vid` rule, mirroring the existing `stockCount` policy (authenticated users may only *decrease* it; admin unrestricted via the cascading parent rule). Without it, a customer's checkout write to the per-option counter is denied and only the product total moves.
+  - Rules published 7 Sept 2026, including the `products/$id/variantStock/$vid` rule, mirroring the existing `stockCount` policy (authenticated users may only *decrease* it; admin unrestricted via the cascading parent rule). Without it, a customer's checkout write to the per-option counter is denied and only the product total moves.
 - **Fixed: a fully sold-out product used to still sell.** With every option flagged sold out, the page showed "In Stock", the Add button was live, and a sold-out option went into the cart. Availability now derives from the options themselves.
 - Not yet done: static SEO pages under `/p/` still print a single price and should say "from ₹X" for option products.
 
