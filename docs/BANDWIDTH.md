@@ -166,6 +166,29 @@ Nodes that grow forever, all tiny today, none worth acting on yet:
 | `paymentWebhookEvents/<id>` | one record per payment event, ~150 bytes | the dedupe ledger; never pruned |
 | `orders`, `tankMonthlyEntries`, `totmVotes/<month>` | with the business | real records — Admin already has an order cleanup |
 
+## What it cost, and what it costs now
+
+Confirmed on 14 September, six days after the fix:
+
+| | downloads per day |
+|---|---|
+| Before 21 August (the browser reading images) | 100–300 MB |
+| 21 August – 8 September (plus the shop pages) | 1.2–2.2 GB, peaking ~2.2 GB |
+| 9 September onward | a few tens of MB |
+
+The cycle total moved from 8.43 GB on the 8th to 8.81 GB on the 14th — 380 MB across six days,
+and most of that was the 8th itself, which was still half a pre-fix day. The curve is flat on the
+floor from the 9th.
+
+That is roughly a hundredfold reduction, and it ends the risk this document was written about:
+the cycle will close near 9.2 GB instead of running out around the 10th, and a normal month now
+costs well under a tenth of the allowance.
+
+Worth being precise about which change did it. Deploy 29 moved the images to the CDN and the
+daily figure did not move — the curve peaked *after* it. Deploy 30 removed the whole-node read
+from the shop pages and the curve fell off a cliff the next day. The browser path was real but
+small; the server path was the incident.
+
 ## When something looks wrong
 
 Realtime Database → **Usage** shows downloads for the current cycle against the allowance. Check
