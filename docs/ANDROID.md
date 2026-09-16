@@ -262,15 +262,23 @@ which is exactly why the second tap always worked. Cancelling throws
 who dismissed the picker deliberately. Customers no longer see Java class names; the exception
 goes to Logcat under `NemoAuth` instead.
 
+### Edge-to-edge is settled
+
+Release 13 drew two flags: *Edge-to-edge may not display for all users* and *deprecated APIs or
+parameters for edge-to-edge*. They turned out to be two different things.
+
+The deprecated calls were never in this app — every call site Play named sits inside
+`com.google.android.material`. The fix was a dependency bump, Material 1.10.0 → 1.14.0 in
+`gradle/libs.versions.toml`, shipped in version code 14.
+
+The display half was already handled, on the web side: `viewport-fit=cover` in `index.html`
+makes the `env(safe-area-inset-*)` values real, and `app.jsx` spends them on the header, the
+bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 15 phone
+against version code 14 — header and camera cutout, bottom nav against the gesture pill, the
+floating cart bar, a bottom sheet, and landscape. Nothing clipped, nothing hidden.
+
 ## Still open
 
-- **Edge-to-edge under Android 15+.** The release dashboard flagged *deprecated APIs or
-  parameters for edge-to-edge* against release 13. Every call site it named sits inside
-  `com.google.android.material`, not in this app, so the fix was a dependency bump: Material
-  1.10.0 → 1.14.0 in `gradle/libs.versions.toml`, shipped in version code 14. Whether the page
-  itself ever clips under the status bar or the gesture pill is a separate question, and the
-  web layer already handles it — `viewport-fit=cover` in `index.html` plus
-  `env(safe-area-inset-*)` throughout `app.jsx`.
 - `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
   loads `https://www.nemoaquastore.in`. Left alone during the qualifying run because a
   third-party subresource loading over http would fail silently, and only in release.
