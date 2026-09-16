@@ -148,25 +148,59 @@ libdatastore_shared_counter.so` during the build, and Play's *no deobfuscation f
 native debug symbols* notices on upload. The native library belongs to AndroidX, not to
 this app.
 
-### R8 is off on purpose
+### R8, and the two rules that keep the bridge alive
 
-`buildTypes.release` sets `optimization { enable = false }`, so Play's bundle report shows
-*App optimisation: Low*, *Obfuscation 3%* and *No R8 metadata included*. None of that blocked
-review or production access — both were granted with these scores showing.
+`buildTypes.release` sets `optimization { enable = true }` and points `proguardFiles` at
+`proguard-android-optimize.txt` plus the app's own `app/proguard-rules.pro`. Turned on for
+version code 14 on 16 September 2026, to clear Play's *App optimisation is below our
+threshold* flag and its **Fix by Feb 2027** date.
 
-**It does now carry a deadline.** Since production access was granted the release dashboard
-raises *App optimisation is below our threshold* against release 13, with a **Fix by Feb
-2027**: Play says a category under 25% "may impact your visibility and publishing capabilities
-on Google Play". So this is no longer purely advisory — it is scheduled work with a date, even
-though nothing breaks in the meantime.
+It was off until then, deliberately, and the reason was `AndroidShareBridge`. Its three
+`@JavascriptInterface` methods — `share`, `openWhatsApp`, `signInWithGoogle` — are never
+called from Kotlin, only from JavaScript by name, through the object registered as
+`NemoAndroid`. R8 therefore reads them as dead code and strips them, which breaks native
+sharing and Google sign-in **in release builds only** — the worst shape a bug can take,
+because a debug run looks perfect.
 
-The reason to leave R8 off is `AndroidShareBridge`. Its `@JavascriptInterface` methods are
-never called from Kotlin — only from JavaScript, by name — so R8 reads them as dead code and
-strips them. That breaks native sharing and Google sign-in **in release builds only**, which
-is the worst shape for a bug: a debug run looks perfect. Turning R8 on later means writing
-keep rules for that bridge and then re-testing sign-in, sharing and a real payment on a
-device. The qualifying run is over, so the reason to defer it has expired; what remains is to
-do it deliberately, on a quiet week, rather than alongside a launch. Well before Feb 2027.
+Two rules hold it open. The bridge is an *inner* class of `MainActivity`, so its real name
+carries the `$`:
+
+```proguard
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class in.nemoaquastore.app.MainActivity$AndroidShareBridge { *; }
+```
+
+What is deliberately **not** there is a package-wide `-keep class in.nemoaquastore.app.** { *; }`.
+That builds, runs and passes every test — and leaves the obfuscation score exactly where it
+started, which is the one thing Play was asking about.
+
+**What it bought.** Uncompressed DEX went 14,262,792 → 2,425,624 bytes, the bundle 6.5 MB →
+3.6 MB, and Play's *size for new installs* 5.8 MB → 1.6 MB. It also puts a real `mapping.txt`
+in the bundle, so the *no deobfuscation file* upload warning is gone and crash reports
+deobfuscate.
+
+The 10 MB figure is why this mattered at all: Play enforces the DEX threshold only on bundles
+carrying at least 10 MB of *uncompressed* DEX. Measure it, rather than reading the download
+size, which is two to three times smaller:
+
+```bash
+unzip -l app-release.aab | grep -E '\.dex$' | awk '{sum+=$1} END {print sum}'
+```
+
+At 14.26 MB this app was over the line, so the deadline genuinely applied. It no longer does.
+
+**Verified on a device, version code 14.** Google sign-in, UPI present in the Razorpay sheet,
+a push notification arriving, native sharing and the WhatsApp hand-off — all on the
+Play-signed build from the internal testing track.
+
+One trap worth writing down. A release APK built locally is signed with the **upload**
+keystore, and that certificate's SHA-1 is not registered with the OAuth client: Firebase holds
+the debug certificate and Google's app-signing certificate, not that one. So Google sign-in
+always fails on a locally installed release build, with *"No Google account is available on
+this device"* — with R8 or without it. Do not read that as a keep-rule failure. Sign-in can
+only be tested on a Play-signed build.
 
 ## What version code 13 added
 
@@ -230,14 +264,13 @@ goes to Logcat under `NemoAuth` instead.
 
 ## Still open
 
-- **R8, by Feb 2027.** Play's optimisation threshold now has a date on it — see *R8 is off on
-  purpose* above for what turning it on requires and why it was deferred.
-- **Edge-to-edge under Android 15+.** The release dashboard flags *Edge-to-edge may not display
-  for all users* and *deprecated APIs or parameters for edge-to-edge* against release 13. With
-  `targetSdk 36` the system draws behind the status and gesture bars whether the app asks or
-  not, and this is a WebView wrapper, so the page can end up clipped by the status bar or
-  sitting under the gesture pill. Unverified: it needs looking at on a real Android 15 or 16
-  device before deciding whether there is anything to fix.
+- **Edge-to-edge under Android 15+.** The release dashboard flagged *deprecated APIs or
+  parameters for edge-to-edge* against release 13. Every call site it named sits inside
+  `com.google.android.material`, not in this app, so the fix was a dependency bump: Material
+  1.10.0 → 1.14.0 in `gradle/libs.versions.toml`, shipped in version code 14. Whether the page
+  itself ever clips under the status bar or the gesture pill is a separate question, and the
+  web layer already handles it — `viewport-fit=cover` in `index.html` plus
+  `env(safe-area-inset-*)` throughout `app.jsx`.
 - `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
   loads `https://www.nemoaquastore.in`. Left alone during the qualifying run because a
   third-party subresource loading over http would fail silently, and only in release.
