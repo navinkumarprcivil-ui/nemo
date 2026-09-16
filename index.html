@@ -813,10 +813,19 @@
     snails=[mkSnail('bottom'), mkSnail('left'), mkSnail('right')];
   }
   function resize(){
+    var prevW=W;
     W=window.innerWidth; H=window.innerHeight;
     canvas.width=Math.floor(W*DPR); canvas.height=Math.floor(H*DPR);
     canvas.style.width=W+'px'; canvas.style.height=H+'px';
-    ctx.setTransform(DPR,0,0,DPR,0,0); seed();
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    /* Seeding starts the aquarium over: fresh bubbles, both fish dropped at new positions,
+       new snails. On a phone the commonest resize by far is the soft keyboard opening over an
+       address field, and that changes the height and nothing else — so re-seeding there made
+       the fish blink out mid-swim and reappear somewhere else, once as the keyboard came up
+       and again as it went away. Only a width change starts over: a rotation, or a desktop
+       window being dragged. A height change alone just hands the same inhabitants a shorter
+       tank, and the soft walls already ease them back inside it. */
+    if(W!==prevW) seed();
   }
   function bg(){
     var g=ctx.createLinearGradient(0,0,0,H);
@@ -1094,9 +1103,23 @@
     return false;
   }
 
+  /* The soft keyboard resizes the WebView, so window.innerHeight drops by several hundred
+     pixels for as long as an address is being typed. A drifter spawned against that shrunken
+     height enters "just below the bottom edge" of a screen that now ends above the keyboard —
+     halfway up the view — so it appears out of nowhere instead of rising into frame. Hold on
+     to the full height instead: only a width change (a rotation, or a window actually being
+     resized) or a taller viewport (the keyboard going away) may replace it. */
+  var vpW=window.innerWidth, vpH=window.innerHeight;
+  function viewH(){
+    var w=window.innerWidth, h=window.innerHeight;
+    if(w!==vpW){ vpW=w; vpH=h; }
+    else if(h>vpH) vpH=h;
+    return vpH;                          // shorter at the same width is the keyboard: ignore it
+  }
+
   function spawn(){
     uid++;
-    var W=window.innerWidth, H=window.innerHeight;
+    var W=window.innerWidth, H=viewH();
     // The betta and clownfish in the wallpaper render 72-78px wide; keep this well under half
     // of that. The bell is ~86% of the SVG width, so a 34px svg gives a ~29px bell.
     var w=26+Math.random()*7, h=w*(389/180);        // the sticker's own proportions
