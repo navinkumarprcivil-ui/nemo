@@ -151,16 +151,22 @@ this app.
 ### R8 is off on purpose
 
 `buildTypes.release` sets `optimization { enable = false }`, so Play's bundle report shows
-*App optimisation: Low*, *Obfuscation 3%* and *No R8 metadata included*. Those are advisory
-performance scores, not policy checks; they have no bearing on review or on production
-access.
+*App optimisation: Low*, *Obfuscation 3%* and *No R8 metadata included*. None of that blocked
+review or production access — both were granted with these scores showing.
+
+**It does now carry a deadline.** Since production access was granted the release dashboard
+raises *App optimisation is below our threshold* against release 13, with a **Fix by Feb
+2027**: Play says a category under 25% "may impact your visibility and publishing capabilities
+on Google Play". So this is no longer purely advisory — it is scheduled work with a date, even
+though nothing breaks in the meantime.
 
 The reason to leave R8 off is `AndroidShareBridge`. Its `@JavascriptInterface` methods are
 never called from Kotlin — only from JavaScript, by name — so R8 reads them as dead code and
 strips them. That breaks native sharing and Google sign-in **in release builds only**, which
 is the worst shape for a bug: a debug run looks perfect. Turning R8 on later means writing
 keep rules for that bridge and then re-testing sign-in, sharing and a real payment on a
-device. Worth doing once the app is through its qualifying run; not worth doing during it.
+device. The qualifying run is over, so the reason to defer it has expired; what remains is to
+do it deliberately, on a quiet week, rather than alongside a launch. Well before Feb 2027.
 
 ## What version code 13 added
 
@@ -224,6 +230,14 @@ goes to Logcat under `NemoAuth` instead.
 
 ## Still open
 
+- **R8, by Feb 2027.** Play's optimisation threshold now has a date on it — see *R8 is off on
+  purpose* above for what turning it on requires and why it was deferred.
+- **Edge-to-edge under Android 15+.** The release dashboard flags *Edge-to-edge may not display
+  for all users* and *deprecated APIs or parameters for edge-to-edge* against release 13. With
+  `targetSdk 36` the system draws behind the status and gesture bars whether the app asks or
+  not, and this is a WebView wrapper, so the page can end up clipped by the status bar or
+  sitting under the gesture pill. Unverified: it needs looking at on a real Android 15 or 16
+  device before deciding whether there is anything to fix.
 - `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
   loads `https://www.nemoaquastore.in`. Left alone during the qualifying run because a
   third-party subresource loading over http would fail silently, and only in release.
