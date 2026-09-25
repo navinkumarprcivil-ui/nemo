@@ -4789,11 +4789,26 @@ function generateBillHTML(order, settings){
   </div>
 </div></div></body></html>`;
 }
+/* Inside the Android app there is nowhere to open a second tab.
+
+   The WebView hands a window.open to Android as an intent, and nothing on the phone can
+   open a blob: URL, so tapping Quick Bill or Invoice produced "No compatible app found"
+   and no document at all. The same code opens a tab correctly in every browser, so the
+   browser path below is left exactly as it was and only the app is routed elsewhere:
+   NemoStore registers a viewer that renders the document in an overlay instead.
+
+   window.NemoAndroid is the bridge MainActivity injects, so its presence is proof we are
+   in the app rather than a guess from the user agent or display-mode. */
+let DOC_VIEWER=null;
+function setDocViewer(fn){ DOC_VIEWER=fn; }
+function inAndroidApp(){ return typeof window!=="undefined" && !!window.NemoAndroid; }
+
 /* Open a generated HTML doc in a new tab. Prefer a Blob URL — it loads as a real
    document so the <meta viewport> is honoured and the page fits the phone screen
    (writing into a blank about:blank tab makes mobile browsers use a 980px desktop
    width, so the bill looked tiny on the left). Falls back to document.write. */
 function openDocHTML(html){
+  if(inAndroidApp() && DOC_VIEWER){ DOC_VIEWER(html); return; }
   try{
     const blob=new Blob([html],{type:"text/html;charset=utf-8"});
     const url=URL.createObjectURL(blob);
@@ -10785,6 +10800,41 @@ function DetailPage({product:p,products=[],mediaCache={},media={images:[],video:
 
 /* ═══════════════════ CART PAGE ═══════════════════ */
 /* Slide-in mini-cart — quick peek + checkout without leaving the page */
+/* The bill and the tax invoice, shown inside the Android app.
+
+   In a browser these open as their own tab and nothing here runs. The WebView cannot open
+   one (see openDocHTML), so the same generated HTML is rendered in an iframe instead:
+   srcDoc keeps the document's own stylesheet and A4 layout intact without a blob URL, a
+   navigation, or an intent for Android to refuse. The frame is fully sandboxed — these
+   documents are static markup, so nothing in them needs to run.
+
+   Both documents carry a "Print / Save PDF" button, marked .np so it stays off the paper.
+   A plain WebView has no print support, so in here it would be a button that does nothing:
+   the injected rule hides it. Printing from the app needs Android's PrintManager wiring in
+   MainActivity, which is a job for the next app build, not the website.
+
+   Until then the customer's copy still reaches them: the order email carries the full
+   itemised invoice in its body, and the browser prints these documents normally. */
+function DocViewer({html,onClose}){
+  if(!html) return null;
+  const src=String(html);
+  const title=(src.match(/<title>([^<]*)<\/title>/i)||[])[1]||"Document";
+  const doc=src.replace("</head>","<style>.np{display:none!important}</style></head>");
+  return(
+    <Portal>
+      <div style={{position:"fixed",inset:0,background:"#ffffff",zIndex:5200,display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexShrink:0}}>
+          <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:16,fontWeight:800,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
+          <button className="press" onClick={onClose} aria-label="Close"
+            style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:"50%",width:34,height:34,fontSize:18,color:C.text,cursor:"pointer",flexShrink:0}}>×</button>
+        </div>
+        <iframe title={title} srcDoc={doc} sandbox=""
+          style={{flex:1,width:"100%",border:"none",background:"#ffffff"}}/>
+      </div>
+    </Portal>
+  );
+}
+
 function MiniCart({open,onClose,cart,total,updateQty,nav,settings={},products=[],mediaCache={}}){
   const count=cart.reduce((s,i)=>s+i.qty,0);
   const thr=Number(settings.freeDeliveryThreshold||0);
@@ -17919,6 +17969,10 @@ function NemoStore(){
   const [communityReady,setCommunityReady] = useState(false);
   const [restockSet,setRestockSet] = useState(()=>loadRestockLocal().map(x=>x.pid));
   const [selProduct,setSelProduct] = useState(null);
+  /* The bill and invoice open as their own tab in a browser. Inside the Android app there is
+     no tab to open, so openDocHTML hands the document here instead — see DocViewer. */
+  const [docHtml,setDocHtml] = useState(null);
+  useEffect(()=>{ setDocViewer(setDocHtml); return ()=>setDocViewer(null); },[]);
   const [walletPts,setWalletPts]   = useState(0);
   const [walletReady,setWalletReady] = useState(false);
   /* The sixth boot gate: the webfont. Every other gate is about data; this one is about the
@@ -19851,6 +19905,7 @@ function NemoStore(){
         );
       })()}
       {!isAdminPage&&<BottomNav page={page} nav={nav} cartCount={cartCount} ordersCount={priorityOrderCount}/>} 
+      <DocViewer html={docHtml} onClose={()=>setDocHtml(null)}/>
       {!isAdminPage&&<MiniCart open={miniOpen} onClose={()=>setMiniOpen(false)} cart={cart} total={cartTotal} updateQty={updateQty} nav={nav} settings={settings} products={shopProducts} mediaCache={mediaCache}/>}
     </div>
   );
