@@ -277,6 +277,62 @@ bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 
 against version code 14 — header and camera cutout, bottom nav against the gesture pill, the
 floating cart bar, a bottom sheet, and landscape. Nothing clipped, nothing hidden.
 
+### Printing is not wired up, and that is the next app change
+
+A WebView cannot open a `blob:` URL. It hands the URL to Android as an intent, no app claims
+it, and the customer gets **"No compatible app found"** — which is what Quick Bill and Invoice
+did in version 14. It also has no print support of its own: `window.print()` is a no-op inside
+a WebView unless `PrintManager` is wired in on the native side.
+
+Version 14's fix was web-side only. `openDocHTML()` in `app.jsx` checks for the bridge and,
+inside the app, renders the document into `DocViewer` — a full-screen sandboxed iframe — instead
+of opening a window. `sandbox="allow-scripts"` and nothing else: the invoice carries its own
+fit-to-width script, and blocking it was what left the sheet's foot below the bottom of the
+screen; without `allow-same-origin` the frame still keeps an opaque origin and can reach
+nothing of the app. The header's **Share** button sends the itemised bill as text, because text
+is the only thing a WebView can produce.
+
+**What version 15 needs: printing, and saving as a PDF.** Both, from one change — Android's
+system print dialog always lists *Save as PDF* as a destination alongside any real printer, so
+`PrintManager` delivers the save for free. There is no separate PDF path to build, and no
+reason to ship the print half without it.
+
+Three things decide whether it works:
+
+- **Print the document, not the app.** `DocViewer` is an iframe inside the main WebView, so
+  `webView.createPrintDocumentAdapter()` on that WebView would print the store page around it.
+  The bridge method should load the passed HTML into an off-screen `WebView`, wait for
+  `onPageFinished`, and print *that* one. Hold a reference to it until the job ends or it is
+  collected mid-job and the output comes out blank.
+- **Ask for A4.** `PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4)`.
+  The invoice stylesheet already carries `@page{size:A4;margin:12mm}` and a full `@media print`
+  block, so the printed sheet is the A4 layout, not the phone reflow — the `@media(max-width:640px)`
+  rules only apply on screen.
+- **Feature-detect the bridge, don't assume it.** The website updates the moment it is deployed;
+  the app updates whenever each customer's Play Store gets round to it. A Print button must
+  appear only when `window.NemoAndroid.printDocument` actually exists, or every phone still on
+  version 14 shows a button that does nothing.
+
+Sketch of the native half:
+
+```kotlin
+@JavascriptInterface
+fun printDocument(html: String, jobName: String) = runOnUiThread {
+    val w = WebView(this)                      // keep a field reference: see above
+    w.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView, url: String) {
+            val pm = getSystemService(Context.PRINT_SERVICE) as PrintManager
+            pm.print(jobName, view.createPrintDocumentAdapter(jobName),
+                PrintAttributes.Builder()
+                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4).build())
+        }
+    }
+    w.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+}
+```
+
+Then `DocViewer` gains a Print button beside Share, guarded on the bridge method being there.
+
 ## Still open
 
 - `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
