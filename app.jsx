@@ -2058,6 +2058,41 @@ async function loadMediaItem(key){
   if(FB_OK){ try{ const s=await withTimeout(FB_DB.ref("media/"+key).get(),6000); const v=s&&s.val(); if(v){ mediaSet("nemo-m-"+key,v); return v; } }catch(e){} }
   return null;
 }
+/* Resolve a media key to something an <img src> can use, WITHOUT reading the database.
+
+   hydrateMedia pulls every gallery image of every product on boot, not just the ones on
+   screen. For a photo the CDN already holds that costs nothing. For a photo that lives only
+   in the database — anything uploaded since the migration — it meant every visitor pulling
+   the full-size base64 through the Firebase SDK on every cold start, whether or not they ever
+   opened that product. That is the shape of the 1.2 GB/day described above, and it comes back
+   in miniature with each new photo.
+
+   The Worker already solves this: /share-image/<key> hands back the CDN file when there is
+   one and otherwise reads the key from the database ONCE and caches the answer at the edge
+   for an hour (see shareImageResponse in cloudflare/worker.js). So a new photo costs a read
+   per hour shared across every visitor, instead of a read per visitor per boot — and the
+   browser gets an ordinary cacheable image URL rather than a megabyte of base64 in a
+   Firebase payload.
+
+   Order: whatever this device already has, then the CDN, then the Worker. The last never
+   returns null, so every key still resolves and nothing renders empty. */
+function dbMediaPath(key){ return key?("/share-image/"+encodeURIComponent(key)):null; }
+
+async function loadMediaItemLocal(key){
+  const cached=await mediaGet("nemo-m-"+key); if(cached)return cached;
+  return cdnMediaPath(key)||dbMediaPath(key);
+}
+/* The catalogue thumbnail for a key. `?thumb=1` makes the Worker try <key>_thumb first and
+   fall back to the full image, so a product flagged as having a thumbnail that was never
+   actually stored shows the photo rather than a broken image. */
+async function loadThumbLocal(key){
+  const cached=await mediaGet("nemo-m-"+key+"_thumb"); if(cached)return cached;
+  return cdnMediaPath(key+"_thumb")||(key?("/share-image/"+encodeURIComponent(key)+"?thumb=1"):null);
+}
+async function loadImgLocal(id){
+  const l=await mediaGet("nemo-img-"+id); if(l)return l;
+  return cdnMediaPath("img-"+id)||dbMediaPath("img-"+id);
+}
 async function delMediaItem(key){
   await mediaDel("nemo-m-"+key);
   if(FB_OK){ try{ await FB_DB.ref("media/"+key).remove(); }catch(e){} }
@@ -17969,34 +18004,37 @@ function NemoStore(){
           const first=p.media.find(m=>m.type!=="video")||p.media[0];
           if(first && !first.url){
             // Legacy item (no embedded URL): prefer the tiny thumbnail; fall back to full image.
-            if(first.thumb){ const t=await loadMediaItem(first.key+"_thumb"); if(t){ firstWave["thumb-"+first.key]=t; return; } }
-            const b=await loadMediaItem(first.key); if(b)firstWave["m-"+first.key]=b;
+            if(first.thumb){ const t=await loadThumbLocal(first.key); if(t){ firstWave["thumb-"+first.key]=t; return; } }
+            const b=await loadMediaItemLocal(first.key); if(b)firstWave["m-"+first.key]=b;
           }
         }
-        else if(p.hasImg){ const b=await loadImg(p.id); if(b)firstWave["img-"+p.id]=b; }
+        else if(p.hasImg){ const b=await loadImgLocal(p.id); if(b)firstWave["img-"+p.id]=b; }
       }));
       if(Object.keys(firstWave).length) setMediaCache(c=>({...c,...firstWave}));
     }catch(e){}
 
-    // Wave 2 — full load: every gallery image, videos, request & guide images (unchanged).
+    // Wave 2 — full load: every gallery image, videos, request & guide images. Resolves through
+    // the local cache, then the CDN, then the Worker's edge-cached /share-image route — never
+    // through the Firebase SDK, so boot costs the database nothing however many photos are
+    // still waiting to be migrated. Everything already on the CDN resolves exactly as before.
     const cache={};
     await Promise.all([
       ...prods.map(async p=>{
         // New multi-media gallery. Items whose URL is embedded on the product need NO DB read
-        // (rendered straight from m.url / m.thumbUrl) — only legacy items hit loadMediaItem.
+        // (rendered straight from m.url / m.thumbUrl) — only legacy items hit the resolver.
         if(Array.isArray(p.media)&&p.media.length){
           await Promise.all(p.media.map(async m=>{
             if(m.url) return; // embedded URL — zero extra reads
-            if(m.thumb){ const t=await loadMediaItem(m.key+"_thumb"); if(t)cache["thumb-"+m.key]=t; }
-            const b=await loadMediaItem(m.key); if(b)cache["m-"+m.key]=b;
+            if(m.thumb){ const t=await loadThumbLocal(m.key); if(t)cache["thumb-"+m.key]=t; }
+            const b=await loadMediaItemLocal(m.key); if(b)cache["m-"+m.key]=b;
           }));
         }
         // Legacy single image/video
-        if(p.hasImg){const b=await loadImg(p.id);if(b)cache["img-"+p.id]=b;}
+        if(p.hasImg){const b=await loadImgLocal(p.id);if(b)cache["img-"+p.id]=b;}
         if(p.hasVid){const b=await loadVid(p.id);if(b)cache["vid-"+p.id]=b;}
       }),
-      ...reqs.map(async r=>{ if(r.hasImg){const b=await loadImg(r.id);if(b)cache["img-"+r.id]=b;} }),
-      ...guideList.map(async g=>{ if(g.hasImg){const b=await loadImg(g.id);if(b)cache["img-"+g.id]=b;} }),
+      ...reqs.map(async r=>{ if(r.hasImg){const b=await loadImgLocal(r.id);if(b)cache["img-"+r.id]=b;} }),
+      ...guideList.map(async g=>{ if(g.hasImg){const b=await loadImgLocal(g.id);if(b)cache["img-"+g.id]=b;} }),
     ]);
     setMediaCache(c=>({...c,...cache}));
   };
@@ -19049,7 +19087,9 @@ function NemoStore(){
       for(const m of p.media){
         const entry={...m};
         const isThumbTarget = m.key===firstImgKey;   // only the 1st image becomes the thumbnail
-        const cur = m.url || mediaCache["m-"+m.key] || await loadMediaItem(m.key);
+        /* Not mediaCache: since boot resolves images to CDN/Worker URLs rather than base64,
+           the cache no longer holds bytes, and makeThumb needs the real ones. */
+        const cur = m.url || await loadMediaItem(m.key);
         // Embed an existing Storage URL on the record (cheap, kills a per-image DB read).
         if(typeof cur==="string" && /^https?:/.test(cur) && !entry.url){ entry.url=cur; changed=true; }
         // Generate a thumbnail ONLY for the first image, and only if it doesn't have one yet.
