@@ -4507,6 +4507,21 @@ function buildInvoiceFields(order, settings){
   };
 }
 
+/* The bill as a message someone can actually receive.
+
+   Sharing the document itself would mean handing Android a file, and the WebView has no way
+   to make one — no print, no PDF, no blob it can pass on. What it can share is text, through
+   the same share sheet the product links use. So the customer gets the itemised bill as a
+   WhatsApp or SMS message: the same lines buildInvoiceFields already writes into the order
+   email, which is the copy of record. */
+function invoiceShareText(order, settings){
+  try{
+    const f=buildInvoiceFields(order||{}, settings||{});
+    const head=`${f.invoice_label} ${f.invoice_no}`.trim();
+    return { title:`${head} · ${STORE_NAME} Aqua Store`, text:`*${head}*\n\n${f.order_invoice}` };
+  }catch(e){ return null; }
+}
+
 /* Read EmailJS credentials from settings, trimmed. Pasting keys often leaves a trailing
    space/newline which makes EmailJS reject the call (or look "missing") — normalise here. */
 function ejKeys(s){
@@ -4728,7 +4743,7 @@ function generateBillHTML(order, settings){
   const billAddrLine=`${E(billingAddr.address||"")}, ${E(billingAddr.city||"")} — ${E(billingAddr.pincode||"")}`;
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invoice ${E(o.orderNo||orderId(o.id||""))}</title>
-<style>*{box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#eef9fa;margin:0;padding:16px}.page{max-width:560px;margin:0 auto;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 8px 32px rgba(11,110,114,.15)}.hdr{background:linear-gradient(135deg,#0b6e72,#12b5bc);padding:24px;color:#fff}.hdr h1{margin:0 0 2px;font-size:22px;font-weight:800}.hdr .sub{font-size:12px;opacity:.92;margin-top:2px;color:#ffffff}.badge{display:inline-block;background:rgba(255,255,255,.2);border-radius:20px;padding:4px 14px;font-size:11px;font-weight:700;margin-top:8px}.body{padding:20px 22px 28px}.r2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}.box{background:#f5fdfe;border:1px solid #cce8ea;border-radius:12px;padding:12px 14px}.box h4{margin:0 0 6px;font-size:10px;font-weight:800;color:#0b6e72;text-transform:uppercase;letter-spacing:.8px}.box p{margin:0 0 3px;font-size:12.5px;color:#0a2426;font-weight:600;line-height:1.5}.sub{font-size:11px;color:#5a8085;font-weight:400}table{width:100%;border-collapse:collapse}th{background:#0b6e72;color:#fff;padding:9px 10px;text-align:left;font-size:11px;font-weight:700;letter-spacing:.5px}th:last-child{text-align:right}.footer{margin-top:20px;padding-top:14px;border-top:1px dashed #cce8ea;font-size:11.5px;color:#5a8085;text-align:center;line-height:1.8}@media print{body{background:#fff;padding:0}.page{box-shadow:none;border-radius:0}.np{display:none!important}}</style></head>
+<style>*{box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#eef9fa;margin:0;padding:16px}.page{max-width:560px;margin:0 auto;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 8px 32px rgba(11,110,114,.15)}.hdr{background:linear-gradient(135deg,#0b6e72,#12b5bc);padding:24px;color:#fff}.hdr h1{margin:0 0 2px;font-size:22px;font-weight:800}.hdr .sub{font-size:12px;opacity:.92;margin-top:2px;color:#ffffff}.badge{display:inline-block;background:rgba(255,255,255,.2);border-radius:20px;padding:4px 14px;font-size:11px;font-weight:700;margin-top:8px}.body{padding:20px 22px 28px}.r2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}.box{background:#f5fdfe;border:1px solid #cce8ea;border-radius:12px;padding:12px 14px}.box h4{margin:0 0 6px;font-size:10px;font-weight:800;color:#0b6e72;text-transform:uppercase;letter-spacing:.8px}.box p{margin:0 0 3px;font-size:12.5px;color:#0a2426;font-weight:600;line-height:1.5}.sub{font-size:11px;color:#5a8085;font-weight:400}table{width:100%;border-collapse:collapse}th{background:#0b6e72;color:#fff;padding:9px 10px;text-align:left;font-size:11px;font-weight:700;letter-spacing:.5px}th:last-child{text-align:right}.footer{margin-top:20px;padding-top:14px;border-top:1px dashed #cce8ea;font-size:11.5px;color:#5a8085;text-align:center;line-height:1.8}@media(max-width:520px){body{padding:8px}.page{border-radius:12px}.body{padding:16px 14px 22px}.r2{grid-template-columns:1fr}}@media print{body{background:#fff;padding:0}.page{box-shadow:none;border-radius:0}.np{display:none!important}}</style></head>
 <body><div class="page">
 <div class="hdr">
   <div style="font-size:11px;opacity:.7;letter-spacing:1px">${docLabel}</div>
@@ -4807,8 +4822,8 @@ function inAndroidApp(){ return typeof window!=="undefined" && !!window.NemoAndr
    document so the <meta viewport> is honoured and the page fits the phone screen
    (writing into a blank about:blank tab makes mobile browsers use a 980px desktop
    width, so the bill looked tiny on the left). Falls back to document.write. */
-function openDocHTML(html){
-  if(inAndroidApp() && DOC_VIEWER){ DOC_VIEWER(html); return; }
+function openDocHTML(html, share){
+  if(inAndroidApp() && DOC_VIEWER){ DOC_VIEWER({html, share:share||null}); return; }
   try{
     const blob=new Blob([html],{type:"text/html;charset=utf-8"});
     const url=URL.createObjectURL(blob);
@@ -4822,7 +4837,7 @@ function openDocHTML(html){
   }
 }
 function openBill(order,settings){
-  openDocHTML(generateBillHTML(order,settings||{}));
+  openDocHTML(generateBillHTML(order,settings||{}), invoiceShareText(order,settings));
 }
 
 /* ── Professional invoice (corporate A4 layout, print → PDF) ─────────────────
@@ -5222,6 +5237,33 @@ body.fit:not(.actual){overflow-x:hidden}
 body.actual .fitwrap{transform:none!important;width:auto!important;height:auto!important}
 .fitbtn{position:fixed;right:12px;bottom:12px;z-index:50;background:#2f4b7c;color:#fff;border:none;border-radius:99px;padding:10px 18px;font-size:12.5px;font-weight:700;box-shadow:0 6px 18px rgba(31,56,100,.35);cursor:pointer;display:none}
 @media(max-width:820px){.fitbtn{display:inline-block}body{padding:0}}
+/* ── Phones: reflow the sheet instead of shrinking it ────────────────────────
+   Above this width the script at the foot of the document scales the whole A4
+   page down to fit — the same sheet, just smaller. On a phone that scale lands
+   near half, which is a legible document viewed from across a room. Here the
+   layout reflows instead: one column, a masthead sized for the screen, the page
+   as wide as the glass. It runs longer, two A4 pages where one would have done,
+   and in exchange every line is readable at arm's length. Print is untouched —
+   @page below still lays it out as A4.
+
+   The !important carries weight here rather than decorating: the fit script
+   writes transform, width and height as INLINE styles, which beat a stylesheet
+   rule without it, and the sheet would stay scaled with the reflow underneath. */
+@media(max-width:640px){
+  body{padding:0}
+  body.fit .fitwrap,.fitwrap{transform:none!important;width:auto!important;height:auto!important}
+  .page{max-width:100%;width:auto;padding:18px 14px 30px;box-shadow:none}
+  .top{flex-direction:column;gap:14px}
+  .title{text-align:left}
+  .title .big{font-size:27px;letter-spacing:.5px}
+  .meta{margin-left:0;margin-top:10px}
+  .meta td{text-align:left;padding:3px 16px 3px 0}
+  .parties{grid-template-columns:1fr}
+  .parties .col:first-child .b{border-right:none;border-bottom:1px solid #e3e8ef}
+  .tot .lbl,.tot .val{width:auto}
+  .taxsum{margin-left:0;min-width:0;width:100%}
+  .fitbtn{display:none}
+}
 @page{size:A4;margin:12mm}
 @media print{body{background:#fff;padding:0}.page{box-shadow:none;max-width:none;width:auto;padding:0}.np{display:none!important}.fitwrap{transform:none!important;width:auto!important;height:auto!important}table.items tbody tr,.infoblk,.words{page-break-inside:avoid}table.items thead{display:table-header-group}}
 </style></head>
@@ -5369,7 +5411,7 @@ body.actual .fitwrap{transform:none!important;width:auto!important;height:auto!i
 </body></html>`;
 }
 function openInvoice(order,settings){
-  openDocHTML(generateInvoiceHTML(order,settings||{}));
+  openDocHTML(generateInvoiceHTML(order,settings||{}), invoiceShareText(order,settings));
 }
 /* GST Credit Note for a sales return — mirrors the tax invoice but only for the
    returned items, with no shipping/discounts, so the CGST+SGST (or IGST) shown is
@@ -10804,32 +10846,73 @@ function DetailPage({product:p,products=[],mediaCache={},media={images:[],video:
 
    In a browser these open as their own tab and nothing here runs. The WebView cannot open
    one (see openDocHTML), so the same generated HTML is rendered in an iframe instead:
-   srcDoc keeps the document's own stylesheet and A4 layout intact without a blob URL, a
-   navigation, or an intent for Android to refuse. The frame is fully sandboxed — these
-   documents are static markup, so nothing in them needs to run.
+   srcDoc keeps the document's own stylesheet intact without a blob URL, a navigation, or an
+   intent for Android to refuse. The frame is fully sandboxed — these documents are static
+   markup, so nothing in them needs to run.
 
-   Both documents carry a "Print / Save PDF" button, marked .np so it stays off the paper.
-   A plain WebView has no print support, so in here it would be a button that does nothing:
-   the injected rule hides it. Printing from the app needs Android's PrintManager wiring in
-   MainActivity, which is a job for the next app build, not the website.
+   Two things the documents were never written for, because until now they only ever opened
+   in a browser tab:
 
-   Until then the customer's copy still reaches them: the order email carries the full
-   itemised invoice in its body, and the browser prints these documents normally. */
-function DocViewer({html,onClose}){
-  if(!html) return null;
-  const src=String(html);
+   The invoice is an A4 sheet — a 780px page inside 44px of padding inside 20px of body
+   margin. On a phone that leaves the content squeezed into the middle and the last lines
+   pushed below the fold, which is the text that appeared cropped. FIT_CSS gives the narrow
+   case its own rules and ends the page with enough clear space that nothing sits under the
+   edge of the screen.
+
+   And the height has to be the height the phone can actually show. 100dvh excludes the
+   browser chrome that 100vh counts in, and the safe-area inset keeps the foot of the frame
+   clear of the gesture bar; without both, the bottom of the iframe rendered underneath the
+   system UI and its last centimetre was simply not on screen.
+
+   Printing is the one thing that stays missing: a plain WebView has no print support, so the
+   document's own "Print / Save PDF" button would do nothing and is hidden here. That needs
+   Android's PrintManager wired into MainActivity, which is an app build, not a deploy. Share
+   covers the gap in the meantime — see invoiceShareText. */
+const DOC_FIT_CSS=`<style>
+  html{-webkit-text-size-adjust:100%}
+  body{padding-bottom:40px}
+  /* Only the print control goes. .np also marks the invoice's own "Actual size"
+     toggle, which still does its job at tablet widths, so hiding the class
+     wholesale would take a working control with the dead one. */
+  .np:not(.fitbtn){display:none!important}
+</style>`;
+
+function DocViewer({doc,onClose,showToast}){
+  if(!doc||!doc.html) return null;
+  const src=String(doc.html);
   const title=(src.match(/<title>([^<]*)<\/title>/i)||[])[1]||"Document";
-  const doc=src.replace("</head>","<style>.np{display:none!important}</style></head>");
+  const html=src.replace("</head>",DOC_FIT_CSS+"</head>");
+  const share=doc.share;
+
+  /* The share sheet inside the app is MainActivity's, reached through navigator.share. When
+     there is none, the text goes to the clipboard so it can be pasted anywhere. */
+  const doShare=async()=>{
+    if(!share) return;
+    try{
+      if(navigator.share){ await navigator.share({title:share.title, text:share.text}); return; }
+    }catch(e){ if(String(e).includes("AbortError")) return; }
+    try{ await navigator.clipboard.writeText(share.text); showToast&&showToast("Bill copied — paste to send it"); }
+    catch(e){ window.open(`https://wa.me/?text=${encodeURIComponent(share.text)}`,"_blank"); }
+  };
+
+  const btn={background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:99,padding:"8px 14px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",color:C.text,cursor:"pointer",flexShrink:0};
   return(
     <Portal>
-      <div style={{position:"fixed",inset:0,background:"#ffffff",zIndex:5200,display:"flex",flexDirection:"column"}}>
-        <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexShrink:0}}>
+      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,height:"100dvh",background:"#ffffff",zIndex:5200,display:"flex",flexDirection:"column",paddingBottom:"env(safe-area-inset-bottom, 0px)"}}>
+        <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexShrink:0}}>
           <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:16,fontWeight:800,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
-          <button className="press" onClick={onClose} aria-label="Close"
-            style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:"50%",width:34,height:34,fontSize:18,color:C.text,cursor:"pointer",flexShrink:0}}>×</button>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            {share&&<button className="press" onClick={doShare} style={btn}>Share</button>}
+            <button className="press" onClick={onClose} aria-label="Close"
+              style={{...btn,borderRadius:"50%",width:34,height:34,padding:0,fontSize:18}}>×</button>
+          </div>
         </div>
-        <iframe title={title} srcDoc={doc} sandbox=""
-          style={{flex:1,width:"100%",border:"none",background:"#ffffff"}}/>
+        {/* allow-scripts, and nothing else. The invoice carries its own fit-to-width script,
+            and blocking it was what left a 780px sheet inside a 400px frame with its foot off
+            the bottom of the screen. Without allow-same-origin the frame keeps an opaque
+            origin, so the document can lay itself out and still reach nothing of the app. */}
+        <iframe title={title} srcDoc={html} sandbox="allow-scripts"
+          style={{flex:1,minHeight:0,width:"100%",border:"none",background:"#ffffff"}}/>
       </div>
     </Portal>
   );
@@ -19905,7 +19988,7 @@ function NemoStore(){
         );
       })()}
       {!isAdminPage&&<BottomNav page={page} nav={nav} cartCount={cartCount} ordersCount={priorityOrderCount}/>} 
-      <DocViewer html={docHtml} onClose={()=>setDocHtml(null)}/>
+      <DocViewer doc={docHtml} onClose={()=>setDocHtml(null)} showToast={showToast}/>
       {!isAdminPage&&<MiniCart open={miniOpen} onClose={()=>setMiniOpen(false)} cart={cart} total={cartTotal} updateQty={updateQty} nav={nav} settings={settings} products={shopProducts} mediaCache={mediaCache}/>}
     </div>
   );
