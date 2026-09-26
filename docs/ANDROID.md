@@ -262,20 +262,55 @@ which is exactly why the second tap always worked. Cancelling throws
 who dismissed the picker deliberately. Customers no longer see Java class names; the exception
 goes to Logcat under `NemoAuth` instead.
 
-### Edge-to-edge is settled
+### Edge-to-edge is not settled — and the earlier note here was wrong
 
 Release 13 drew two flags: *Edge-to-edge may not display for all users* and *deprecated APIs or
-parameters for edge-to-edge*. They turned out to be two different things.
+parameters for edge-to-edge*. This section used to say both were closed by bumping Material
+1.10.0 → 1.14.0 in `gradle/libs.versions.toml`. **Release 14 shipped that bump and Play raised
+both flags again, against 14.** The bump was not the fix; do not assume a dependency version
+closed a Play flag until a release carrying it comes back clean.
 
-The deprecated calls were never in this app — every call site Play named sits inside
-`com.google.android.material`. The fix was a dependency bump, Material 1.10.0 → 1.14.0 in
-`gradle/libs.versions.toml`, shipped in version code 14.
+What is actually true of each half:
 
-The display half was already handled, on the web side: `viewport-fit=cover` in `index.html`
-makes the `env(safe-area-inset-*)` values real, and `app.jsx` spends them on the header, the
-bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 15 phone
-against version code 14 — header and camera cutout, bottom nav against the gesture pill, the
-floating cart bar, a bottom sheet, and landscape. Nothing clipped, nothing hidden.
+**The display half is handled, but only where a customer can see it.** `viewport-fit=cover` in
+`index.html` makes the `env(safe-area-inset-*)` values real and `app.jsx` spends them on the
+header, the bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 15
+phone against version code 14 — header and camera cutout, bottom nav against the gesture pill,
+the floating cart bar, a bottom sheet, and landscape: nothing clipped, nothing hidden. Play
+cannot see any of that. It scans the bundle for `enableEdgeToEdge()` and native inset handling,
+finds a WebView wrapper that calls neither, and flags it. So this flag is cosmetic in the
+console and will keep returning until `MainActivity` calls
+`enableEdgeToEdge()` (androidx.activity) in `onCreate`. Two lines, version 15, and it silences a
+warning rather than fixing a defect.
+
+**The deprecated-API half is in a library, not in this app.** Play names
+`android.view.Window.setStatusBarColor` and `setNavigationBarColor` starting in `wk.a`, `xk.a`
+and `yk.a`. Those are R8-obfuscated names, and R8 never renames `MainActivity` — it is
+referenced by name in the manifest, so it is kept. Three obfuscated classes therefore mean
+three library call sites, and nothing in this app's own source to migrate.
+
+Before spending any time on it, find out which library. The release build writes
+`app/build/outputs/mapping/release/mapping.txt`; the entries map original names to obfuscated
+ones, so:
+
+```
+grep -E '\-> (wk|xk|yk)\.a:' app/build/outputs/mapping/release/mapping.txt
+```
+
+names them. If they are Material or Firebase internals the flag is theirs to fix and the only
+move is a later BOM, or living with it.
+
+### One more flag on 14: bitmap decoding
+
+*Improve your app's performance with bitmap image optimisation* — a manual
+`BitmapFactory.decodeStream` in `al0.G`, fed by `HttpURLConnection.getInputStream` in `ag0.O`.
+
+Obfuscated again, so the same `mapping.txt` lookup applies, and the same reasoning: this app
+loads no bitmaps of its own. A WebView decodes images in native code and never touches
+`BitmapFactory`. The pattern Play describes — open an `HttpURLConnection`, decode the stream to a
+`Bitmap` — is what a notification library does when it fetches an image for a large icon, which
+points at Firebase Messaging rather than at anything written here. Confirm with the mapping file
+before acting; an image-loading library cannot be added to code this project does not own.
 
 ### Printing is not wired up, and that is the next app change
 
