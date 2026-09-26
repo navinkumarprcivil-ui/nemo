@@ -368,6 +368,40 @@ fun printDocument(html: String, jobName: String) = runOnUiThread {
 
 Then `DocViewer` gains a Print button beside Share, guarded on the bridge method being there.
 
+## What version code 15 should carry
+
+Release 14 drew three recommended actions and no issue with a deadline. **Only one of the three
+is this app's to clear.** Shipping a bundle has fixed overhead, so the list below is what makes
+the trip worth taking, in value order; the flag-clearing is the cheapest item on it, not the
+reason for the release.
+
+1. **`PrintManager`, with Save as PDF.** The actual feature — see *Printing is not wired up*
+   above for the three things that decide whether it works. This is what version 15 is for.
+2. **`enableEdgeToEdge()` in `MainActivity.onCreate`.** Needs `androidx.activity` 1.8.0 or
+   later, and clears *Edge-to-edge may not display for all users*. **Test it below Android 15
+   before shipping.** On Android 15 the app is already edge-to-edge because `targetSdk` 35 forces
+   it, which is why the on-device check passed; on Android 14 and earlier this call is a real
+   behaviour change — the system bars go transparent and the WebView starts drawing behind them.
+   The web side already spends `env(safe-area-inset-*)`, so it should hold, but "should" is not a
+   test: check the header under the status bar and the bottom nav against the navigation bar on
+   an Android 13 or 14 device or emulator.
+3. **A monochrome notification icon.** `ic_launcher` is what ships today and Android flattens it
+   to a white silhouette.
+4. **Drop `android:usesCleartextTraffic="true"`.** The app only ever loads
+   `https://www.nemoaquastore.in`. It was left in during the qualifying run because a
+   third-party subresource over http would fail silently, and only in release — so exercise
+   payments, sign-in and sharing on the release build after removing it.
+
+**The other two flags are not actionable and should not be chased.** The deprecated
+`setStatusBarColor`/`setNavigationBarColor` calls and the manual `BitmapFactory` decode both sit
+in obfuscated classes, meaning library code — this app has no source that does either. Confirm
+with the `mapping.txt` lookup recorded above, then leave them. They carry no deadline, and a
+Material bump already failed to move the first one once. Razorpay's checkout SDK and Play
+services' credential flow are as likely a source as Material is; Firebase Messaging's
+notification-image fetch is the likely source of the bitmap one. None of that is fixable from
+here, and a dependency bump made on a guess is how the wrong conclusion got written into this
+file in the first place.
+
 ## Still open
 
 - `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
