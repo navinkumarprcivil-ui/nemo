@@ -38,7 +38,7 @@ review naming an old phone is the signal to start building 17 rather than to wai
 
 ---
 
-## Now — publish the rules that make orders undeletable
+## Settled — orders cannot be deleted (rules published 27 September 2026)
 
 `database.rules.json` changed on 27 September 2026: the write rule on `orders/$uid/$oid` now starts
 `auth != null && newData.exists() &&`, so **nobody can delete an order — not a customer, not the
@@ -55,8 +55,8 @@ choice is either to keep the rules as they are and never clear orders, or to cha
 `paymentDeadline` is more than a year old. The owner makes that rules edit in the Firebase Console;
 it was not made from the repo.
 
-**The repo copy does nothing until it is published.** Firebase Console → Realtime Database →
-**Rules** → paste the whole file → **Publish**.
+**Published and verified the same day.** Firebase Console → Rules Playground: a `set` of `null` at
+`orders/testuser/testorder`, authenticated as the main admin UID, returned *Simulated write denied*.
 
 **What the answer should be:** in the Rules tab, the `"$oid"` block's `.write` begins with
 `auth != null && newData.exists() &&`. Placing an order, paying, and moving an order through
