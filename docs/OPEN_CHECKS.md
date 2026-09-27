@@ -47,13 +47,17 @@ the admin, after real, paid, delivered orders from the gateway-testing period we
 Clean Up Old Orders came back at the owner's request, narrowed: finished orders only, a year old at
 least, nothing open on them, backup downloaded first (`orderCleanupEligible` in `app.jsx`).
 
-**Open decision, due by about September 2027.** Under these rules the database refuses the cleanup's
-deletes too, and the button reports them as "refused by the database and kept". No order can
-qualify until one is a year old, so nothing is lost by leaving this until then. At that point the
-choice is either to keep the rules as they are and never clear orders, or to change the `$oid`
-`.write` rule so an admin may delete an order only when it is Delivered or Cancelled and its
-`paymentDeadline` is more than a year old. The owner makes that rules edit in the Firebase Console;
-it was not made from the repo.
+**Decided 27 September 2026, to be done about September 2027.** Under these rules the database
+refuses the cleanup's deletes too, and the button reports them as "refused by the database and
+kept". No order can qualify until one is a year old, so nothing is lost by leaving the rules shut
+until then. The owner chose the narrow exception over keeping everything or deleting by hand in the
+Console: when the first orders turn a year old, change the `$oid` `.write` rule so **only the main
+admin or a co-admin with the orders permission** may delete an order, and only when it is
+**Delivered or Cancelled** and its `paymentDeadline` is **more than a year old**. Everything else
+stays undeletable. Prepare the rule and a test for it in the repo then; the owner pastes it into the
+Firebase Console, publishes, and checks it in the Rules Playground (a recent order must still be
+denied, a year-old Delivered one allowed). Not before — for the year in between, the exception
+would only be a way to lose orders.
 
 **Published and verified the same day.** Firebase Console → Rules Playground: a `set` of `null` at
 `orders/testuser/testorder`, authenticated as the main admin UID, returned *Simulated write denied*.
