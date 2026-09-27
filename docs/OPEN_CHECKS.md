@@ -15,9 +15,9 @@ Submitted for review on 27 September 2026 as a **20% staged rollout**, promoted 
 internal testing. Production had been on 14 (2.0.3) since before the navigation-bar fix existed, so
 every device on it still has the bar sitting over the system buttons.
 
-**Check after review clears, usually a few hours to a day:** Play Console → **Production →
-Releases**. The status moves *In review* → *Available to 20% of users*. Nothing to do but confirm it
-went out.
+**Review cleared and the rollout went live the same day, 27 September 2026.** Production is on
+16 (2.1.1) for 20% of users; 14 (2.0.3) for the rest. What remains is the watch below and then
+raising the percentage.
 
 **Check on days 1 and 2:** Play Console → **Quality → Android vitals → Crashes and ANRs**, filtered
 to version code 16. The number that matters is **crash-free sessions**; compare it against 14 over
@@ -40,43 +40,15 @@ bundle that has been rolled out can never be re-uploaded under the same version 
 
 ---
 
-## Within a day
+## Settled — 27 September 2026
 
-### The WELCOME100 flash
+**The WELCOME100 flash is gone.** Confirmed after `80346e2` with the day key cleared, so the popup
+genuinely opened rather than being suppressed by its once-a-day guard — it showed the purple card
+alone. The `ordersReady` gate holds.
 
-**Shipped in `80346e2`, build `v90.ed293682`.** The once-a-day *Today at Nemo* popup opens on a
-220ms timer and filters its coupons through `usableCoupons(settings, orders, …)`. A first-order
-coupon is usable exactly while `orders` is empty — which it is on every cold start, until the
-listener on `orders/<uid>` answers. `settingsReady` guarded one argument of that filter; nothing
-guarded the other, so a returning customer was shown WELCOME100 for about a second before the app
-corrected itself. An `ordersReady` flag now settles on all six paths out of that effect, including
-a 4-second guard so a dead connection cannot suppress the popup for good.
-
-**Check:** force-stop the app, reopen it. The orange WELCOME100 card should not appear at all on an
-account with order history.
-
-**If it is wrong:** the flag is not settling, or something else opens the popup. `test/promo-popup-gate.test.mjs`
-pins the six settle points; the gate itself is the `settingsReady&&ordersReady` condition on
-`<OfferBanners>`.
-
-### The logcat check that never ran
-
-The crash check for the WELCOME100 report was never conclusive: `adb logcat -c` and the grep were
-run back to back without opening the app in between, so the empty output proved nothing. It was
-diagnosed as a popup, not a crash, and the fix stands on reading the code — but nobody has actually
-looked at the log.
-
-**Check, if it is ever worth it:**
-
-```
-~/Library/Android/sdk/platform-tools/adb logcat -c
-# now open the app, wait for the home page, use it for a few seconds
-~/Library/Android/sdk/platform-tools/adb logcat -d | grep -i -E "fatal|AndroidRuntime|chromium.*error"
-```
-
-Empty output only means something when the app was opened between the two commands.
-
----
+That also closes the logcat check that never ran conclusively. It only ever existed because the
+flash was first reported as a crash; it was a popup reading an empty `orders` list, there was
+nothing in the log to find, and the symptom is now gone.
 
 ## Within a week — Search Console, issue #35
 
