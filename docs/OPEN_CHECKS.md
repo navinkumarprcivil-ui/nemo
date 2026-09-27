@@ -38,7 +38,7 @@ review naming an old phone is the signal to start building 17 rather than to wai
 
 ---
 
-## Now — publish the order-cleanup rule (changed 27 September 2026)
+## Settled — the order-cleanup rule (published 27 September 2026)
 
 The order rules went through two versions on 27 September 2026, both on the owner's instructions.
 
@@ -57,9 +57,9 @@ owed (`refund/due` not true, or `refund/status` is `refunded`). `paymentDeadline
 button's own filter (`orderCleanupEligible` in `app.jsx`) is stricter still — it also skips open
 returns and DOA claims, and requires `placedAt` to be old — and it downloads the backup first.
 
-**To do:** Firebase Console → Realtime Database → **Rules** → paste the whole of
-`database.rules.json` → **Publish**. Then in the **Rules playground**, authenticated as the main
-admin UID, simulate a `set` of `null` at `orders/testuser/testorder`. It must still say
+**Published and verified the same day.** Firebase Console → Realtime Database → **Rules**, the whole of
+`database.rules.json` pasted and published. In the **Rules playground**, authenticated as the main
+admin UID, simulate a `set` of `null` at `orders/testuser/testorder`. It returned
 *Simulated write denied* — that order does not exist, so it is neither Delivered nor a year old.
 
 **What the answer should be:** placing an order, paying, and moving an order through
