@@ -36,7 +36,9 @@ test('the cart nudge does not print the coupon code', () => {
   // The class name appears in the stylesheet first; the markup is the second occurrence.
   const barAt = src.indexOf('className="press floating-cart-bar"');
   const bar = src.slice(barAt, src.indexOf('</button>', barAt));
-  assert.match(bar, /more to get <b>\{dc\.off\}<\/b><\/>/);
+  // offShort, not off: the pill states the offer without its "(up to ₹N)" ceiling, which the
+  // cart prints in full above the checkout button. See test/offer-pill-copy.test.mjs.
+  assert.match(bar, /more to get <b>\{dc\.offShort\}<\/b><\/>/);
   assert.doesNotMatch(bar, /\{dc\.code\}/, 'the code belongs at checkout, not on a spend nudge');
 });
 

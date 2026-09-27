@@ -1063,11 +1063,16 @@ function nextDiscountNudge(cartTotal, settings, orders){
   const offOf=(c)=>c.type==="percent"
     ? `${c.value}% off${c.maxDiscount>0?` (up to ₹${c.maxDiscount})`:""}`
     : `₹${c.value} off`;
+  /* The same offer, without the cap. The floating pill is one line on a phone and the cap
+     pushes it to two, which is a lot of screen to spend on a caveat nobody can act on yet —
+     the number they need is how much more to add. The cart says it in full, directly above
+     the checkout button, which is where the cap actually changes a decision. */
+  const offShortOf=(c)=>c.type==="percent" ? `${c.value}% off` : `₹${c.value} off`;
   // Nearest threshold still ahead; failing that, the best one already cleared.
   const ahead=usable.filter(c=>t<c.minOrder).sort((a,b)=>a.minOrder-b.minOrder)[0];
-  if(ahead) return { need:Math.max(0,Math.ceil(ahead.minOrder-t)), off:offOf(ahead), code:ahead.code, minOrder:ahead.minOrder, unlocked:false };
+  if(ahead) return { need:Math.max(0,Math.ceil(ahead.minOrder-t)), off:offOf(ahead), offShort:offShortOf(ahead), code:ahead.code, minOrder:ahead.minOrder, unlocked:false };
   const won=usable.sort((a,b)=>b.minOrder-a.minOrder)[0];
-  return won ? { need:0, off:offOf(won), code:won.code, minOrder:won.minOrder, unlocked:true } : null;
+  return won ? { need:0, off:offOf(won), offShort:offShortOf(won), code:won.code, minOrder:won.minOrder, unlocked:true } : null;
 }
 
 
@@ -20207,7 +20212,7 @@ function NemoStore(){
             style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:"calc(76px + var(--safe-b))",zIndex:90,width:"calc(100% - 28px)",maxWidth:440,background:"#0f172a",color:"white",border:"none",borderRadius:99,padding:"7px 8px 7px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,boxShadow:"0 14px 34px rgba(15,23,42,.35)",fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:"pointer"}}>
             <span style={{fontSize:12,fontWeight:700,textAlign:"left",lineHeight:1.3,minWidth:0,flex:1,overflow:"visible",textOverflow:"clip",whiteSpace:"normal"}}>
               {showFree?<>🚚 Add <b style={{color:"#fda4af"}}>₹{left}</b> more for free delivery</>
-               :dc?<>🏷️ Add <b style={{color:"#fda4af"}}>₹{dc.need}</b> more to get <b>{dc.off}</b></>
+               :dc?<>🏷️ Add <b style={{color:"#fda4af"}}>₹{dc.need}</b> more to get <b>{dc.offShort}</b></>
                :thr>0&&cartTotal>=thr?<>🎉 Free delivery unlocked!</>
                :<>🛒 {cartCount} item{cartCount!==1?"s":""} in your cart</>}
             </span>
