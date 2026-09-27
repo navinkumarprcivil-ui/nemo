@@ -2111,14 +2111,6 @@ async function saveMediaItem(key,b64,tryStorage=true){
   }
   return true;
 }
-async function loadMediaItem(key){
-  // Check local (IndexedDB) cache first — avoids a 6-second Firebase timeout on every image load
-  const cached=await mediaGet("nemo-m-"+key); if(cached)return cached;
-  // Then the CDN copy, which costs the database nothing. See CDN_MEDIA_KEYS above.
-  const cdn=cdnMediaPath(key); if(cdn) return cdn;
-  if(FB_OK){ try{ const s=await withTimeout(FB_DB.ref("media/"+key).get(),6000); const v=s&&s.val(); if(v){ mediaSet("nemo-m-"+key,v); return v; } }catch(e){} }
-  return null;
-}
 /* Resolve a media key to something an <img src> can use, WITHOUT reading the database.
 
    hydrateMedia pulls every gallery image of every product on boot, not just the ones on
@@ -2157,27 +2149,6 @@ async function loadImgLocal(id){
 async function delMediaItem(key){
   await mediaDel("nemo-m-"+key);
   if(FB_OK){ try{ await FB_DB.ref("media/"+key).remove(); }catch(e){} }
-}
-/* Drop the database copy of every image that now has a file on the CDN.
-
-   `media` is 20.2 MB of a 20.8 MB database — base64 photos and posters, kept there because
-   Firebase Storage needs a paid plan. Once a copy is in assets/media/ the database one is dead
-   weight: every reader checks the CDN first (see CDN_MEDIA_KEYS), so deleting it changes
-   nothing on screen and frees almost the whole database.
-
-   Only keys in that list are touched, and the list is generated from the directory with a test
-   that fails the build if it drifts — so there is no way to delete an image the CDN does not
-   have. Nothing is read: remove() on a path that is already gone is a no-op, which also makes
-   pressing this twice free. Anything uploaded since the migration is not in the list and is
-   left exactly where it is. */
-async function pruneCdnMediaFromDb(onProgress){
-  if(!FB_OK||!FB_DB) return 0;
-  let done=0;
-  for(const key of CDN_MEDIA_KEYS){
-    try{ await FB_DB.ref("media/"+key).remove(); }catch(e){}
-    if(onProgress) onProgress(++done, CDN_MEDIA_KEYS.length);
-  }
-  return done;
 }
 /* Compress an image file to a JPEG data-URL (keeps RTDB + sync light) */
 function compressImage(file, maxDim=1100, quality=0.82){
@@ -14934,7 +14905,7 @@ function AdminExitConfirm({onStay,onLeave}){
 }
 
 /* ═══════════════════ ADMIN HUB (Dashboard + Orders) ═══════════════════ */
-function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onCleanupOrders,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
+function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onCleanupOrders,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
   const [tab,setTab]=useState("orders"); // orders | products | reviews | requests | guides | settings | form | orderDetail
   const showcaseActionRef=useRef(new Set());
   const [showcaseAction,setShowcaseAction]=useState({});
@@ -15017,8 +14988,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
   const [cleanBackedUp,setCleanBackedUp]=useState(false);
   const [cleanConfirm,setCleanConfirm]=useState(false);
   const [cleanBusy,setCleanBusy]=useState(false);
-  const [thumbBusy,setThumbBusy]=useState(false);
-  const [thumbMsg,setThumbMsg]=useState("");
   const [visitStats,setVisitStats]=useState(null);
   useEffect(()=>{ loadAnalytics().then(setVisitStats); },[]);
   // Named visitors, last VISITOR_LOG_DAYS days. Only loaded on the Dashboard tab — it is
@@ -15562,37 +15531,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
             );
           })()}
 
-          {/* Speed up the storefront — migrate product photos to the fast catalog model */}
-          {(()=>{
-            const needOpt=products.filter(p=>{
-              if(!Array.isArray(p.media)||!p.media.length) return false;
-              const first=p.media.find(m=>m.type!=="video");   // catalog thumbnail = first image
-              return first && !first.thumb && !first.thumbUrl;
-            }).length;
-            return(
-              <div style={{background:C.card,borderRadius:16,padding:"14px",marginBottom:14,border:`1px solid ${C.border}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <span style={{fontSize:16}}>⚡</span>
-                  <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:800,color:C.text}}>Speed Up Catalog</span>
-                </div>
-                <div style={{fontSize:11,color:C.textSub,marginBottom:10,lineHeight:1.5}}>
-                  Sets each product's <b>first photo</b> as its catalog thumbnail and shrinks it so the shop grid loads fast (full-size photos still open on the product page). The product editor already makes it when you save, so this is a repair tool — go by the line below rather than by habit. Safe anytime — your full-size photos are never deleted. {needOpt>0?<b>{needOpt} product{needOpt!==1?"s":""} can be optimised.</b>:<span style={{color:C.success,fontWeight:700}}>All products optimised ✓</span>}
-                </div>
-                <button className="press" disabled={thumbBusy||!needOpt} onClick={async()=>{
-                  setThumbBusy(true); setThumbMsg("Optimising…");
-                  try{
-                    const n=await onBackfillThumbs(d=>setThumbMsg(`Optimising… ${d} done`));
-                    setThumbMsg(n?`✓ Optimised ${n} product${n!==1?"s":""}`:"Nothing to optimise — try re-saving the product in the editor.");
-                  }catch(e){ setThumbMsg("⚠ Something went wrong — please try again."); }
-                  setThumbBusy(false);
-                }}
-                  style={{width:"100%",background:(thumbBusy||!needOpt)?"#9ca3af":C.primary,color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:12,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-                  {thumbBusy?"Optimising…":"⚡ Optimise Catalog Images"}
-                </button>
-                {thumbMsg&&<div style={{fontSize:11,color:thumbMsg.startsWith("⚠")?C.danger:C.textSub,fontWeight:600,marginTop:8,lineHeight:1.5}}>{thumbMsg}</div>}
-              </div>
-            );
-          })()}
 
         </div>
       )}
@@ -16153,8 +16091,6 @@ function SettingsPanel({settings,onSave,products=[]}){
   const [sigNote,setSigNote]=useState("");
   const [pwMsg,setPwMsg]=useState("");
   const [backupMsg,setBackupMsg]=useState("");
-  const [pruneMsg,setPruneMsg]=useState("");
-  const [pruneArmed,setPruneArmed]=useState(false);
   const [cacheMsg,setCacheMsg]=useState("");
   const [cacheBusy,setCacheBusy]=useState(false);
   const [sec,setSec]=useState("store"); // settings are split into pages; this is the active one
@@ -16488,48 +16424,6 @@ function SettingsPanel({settings,onSave,products=[]}){
           <div style={{background:"#fff7ed",border:`1px solid #fed7aa`,borderRadius:12,padding:"11px 13px",fontSize:12,color:"#9a3412",lineHeight:1.5}}>🔒 Sign in with your Google admin account to download the full backup (it includes orders, which only you can read).</div>
         )}
         {backupMsg&&<div style={{fontSize:11,color:backupMsg[0]==="✓"?C.success:backupMsg[0]==="⚠"?C.danger:C.textSub,fontWeight:600,marginTop:8}}>{backupMsg}</div>}
-      </Collapsible>
-
-      {/* Free database space ─────────────────────────────────────────────────
-          The database is almost entirely old photos. Every one already has a
-          copy on the CDN, which each reader now consults first, so the
-          database copies are dead weight filling the free allowance. Only
-          images with a CDN file are touched — that list is generated from the
-          directory and the build fails if it drifts — so this cannot clear a
-          picture that has nowhere else to come from. */}
-      <Collapsible icon="🗜️" title="Free Database Space">
-        <div style={{fontSize:12,color:C.textSub,marginBottom:12,lineHeight:1.5}}>
-          Your database is <b>almost all old photos</b> ({CDN_MEDIA_KEYS.length} of them). Every one already has a copy
-          on the website's fast image server, and the app reads that copy first — so the database ones are never
-          used. Clearing them frees nearly the whole database and <b>nothing changes on screen</b>.
-          Photos you have uploaded since the move are left alone.
-        </div>
-        {adminOk ? (
-          <>
-            <button className="press" disabled={pruneMsg==="working"}
-              onClick={async()=>{
-                if(!pruneArmed){ setPruneArmed(true); setPruneMsg(""); return; }
-                setPruneArmed(false); setPruneMsg("working");
-                try{
-                  const n=await pruneCdnMediaFromDb((done,total)=>setPruneMsg("Clearing "+done+" of "+total+"…"));
-                  setPruneMsg("✓ Cleared "+n+" old copies. Firebase usually shows the new size within an hour.");
-                }catch(e){ setPruneMsg("⚠ Could not clear them — try again"); }
-              }}
-              style={{width:"100%",background:pruneArmed?C.danger:C.primary,color:"white",border:"none",borderRadius:12,padding:"12px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",opacity:pruneMsg==="working"?.6:1}}>
-              {pruneArmed?"Tap again to clear — this cannot be undone":"🗃 Clear old photo copies from the database"}
-            </button>
-            {pruneArmed&&(
-              <button className="press" onClick={()=>{setPruneArmed(false);setPruneMsg("");}}
-                style={{width:"100%",marginTop:8,background:"transparent",color:C.textSub,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px",fontSize:12,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-                Cancel
-              </button>
-            )}
-            <div style={{fontSize:11,color:C.textSub,marginTop:8,lineHeight:1.5}}>💡 Download a backup first (above) if you want a copy of the originals.</div>
-          </>
-        ) : (
-          <div style={{background:"#fff7ed",border:`1px solid #fed7aa`,borderRadius:12,padding:"11px 13px",fontSize:12,color:"#9a3412",lineHeight:1.5}}>🔒 Sign in with your Google admin account to clear the old copies.</div>
-        )}
-        {pruneMsg&&pruneMsg!=="working"&&<div style={{fontSize:11,color:pruneMsg[0]==="✓"?C.success:pruneMsg[0]==="⚠"?C.danger:C.textSub,fontWeight:600,marginTop:8}}>{pruneMsg}</div>}
       </Collapsible>
 
       {/* Clear cached copies ─────────────────────────────────────────────────
@@ -19277,54 +19171,6 @@ function NemoStore(){
     }
     return {done,refused};
   };
-  /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
-     so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
-       • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
-       • Paid (Storage on): images move to Storage and their URL + thumbUrl get embedded.
-     Purely additive — full-size images are never deleted. */
-  const backfillThumbs=async(onProgress)=>{
-    let done=0;
-    for(const p of products){
-      if(!Array.isArray(p.media)||!p.media.length) continue;
-      const firstImgKey=(p.media.find(m=>m.type!=="video")||{}).key;
-      let changed=false; const patch={}; const newMedia=[];
-      for(const m of p.media){
-        const entry={...m};
-        const isThumbTarget = m.key===firstImgKey;   // only the 1st image becomes the thumbnail
-        /* Not mediaCache: since boot resolves images to CDN/Worker URLs rather than base64,
-           the cache no longer holds bytes, and makeThumb needs the real ones. */
-        const cur = m.url || await loadMediaItem(m.key);
-        // Embed an existing Storage URL on the record (cheap, kills a per-image DB read).
-        if(typeof cur==="string" && /^https?:/.test(cur) && !entry.url){ entry.url=cur; changed=true; }
-        // Generate a thumbnail ONLY for the first image, and only if it doesn't have one yet.
-        if(isThumbTarget && !entry.thumb && !entry.thumbUrl && typeof cur==="string"){
-          if(FB_STORAGE && /^https?:/.test(cur)){
-            const t=await makeThumbFromAny(cur);
-            if(t){ const tu=await uploadToStorage("media/"+m.key+"_thumb.jpg",t); if(tu){ entry.thumbUrl=tu; entry.thumb=1; patch["thumb-"+m.key]=t; changed=true; } }
-          } else if(cur.startsWith("data:")){
-            if(FB_STORAGE){
-              const r=await persistImage(m.key, cur, true);
-              if(r.url){ entry.url=r.url; changed=true; if(r.url_thumb) entry.thumbUrl=r.url_thumb; }
-              if(r.thumbData){ entry.thumb=1; patch["thumb-"+m.key]=r.thumbData; changed=true; }
-            } else {
-              const t=await makeThumb(cur);
-              if(t){ await saveMediaItem(m.key+"_thumb", t); entry.thumb=1; patch["thumb-"+m.key]=t; changed=true; }
-            }
-          }
-        }
-        newMedia.push(entry);
-      }
-      if(changed){
-        const saved={...p,media:newMedia};
-        setProducts(prev=>{ const next=prev.map(x=>x.id===saved.id?saved:x); saveProd(next); return next; });
-        setMediaCache(c=>({...c,...patch}));
-        done++;
-      }
-      if(onProgress) onProgress(done);
-    }
-    return done;
-  };
-
   // Keep each product's rating/count in sync with its REAL reviews
   const recomputeProductRating=(pid, reviews)=>{
     const count=reviews.length;
@@ -20030,7 +19876,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

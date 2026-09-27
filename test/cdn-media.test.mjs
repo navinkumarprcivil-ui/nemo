@@ -43,11 +43,10 @@ test('the browser copy and the server copy agree', () => {
 });
 
 test('both media readers consult the CDN before the database', () => {
-  // loadImg covers guide posters and legacy single images; loadMediaItem covers the galleries.
+  // loadImg covers guide posters and legacy single images; loadMediaItemLocal covers the galleries.
   assert.match(src, /const c=cdnMediaPath\("img-"\+id\); if\(c\)return c; if\(FB_OK\)/);
-  assert.match(src, /const cdn=cdnMediaPath\(key\); if\(cdn\) return cdn;[\s\S]{0,120}FB_DB\.ref\("media\/"\+key\)/);
-  // The local cache still wins, or the app stops working offline.
-  assert.match(src, /const cached=await mediaGet\("nemo-m-"\+key\); if\(cached\)return cached;\n\s*\/\/ Then the CDN/);
+  // The local cache still wins, or the app stops working offline; then the CDN, then the database.
+  assert.match(src, /async function loadMediaItemLocal\(key\)\{\n\s*const cached=await mediaGet\("nemo-m-"\+key\); if\(cached\)return cached;\n\s*return cdnMediaPath\(key\)\|\|dbMediaPath\(key\);/);
 });
 
 test('a key with no CDN file still falls through to the database', () => {
@@ -55,14 +54,11 @@ test('a key with no CDN file still falls through to the database', () => {
   assert.match(src, /function cdnMediaPath\(key\)\{ return \(key&&CDN_MEDIA\.has\(key\)\)\?\("assets\/media\/"\+key\+"\.jpg"\):null; \}/);
 });
 
-test('the space-clearing tool can only touch images the CDN already has', () => {
-  // It exists because `media` is 20.2 MB of a 20.8 MB database. The safety property is that it
-  // iterates CDN_MEDIA_KEYS and nothing else: every key in that list has a file behind it (the
-  // tests above), so there is no input for which it clears an image with nowhere else to come
-  // from. Anything uploaded since the migration is absent from the list and untouched.
-  assert.match(src, /async function pruneCdnMediaFromDb\(onProgress\)\{[\s\S]{0,400}for\(const key of CDN_MEDIA_KEYS\)/);
-  // And it reads nothing — a removal of an absent path is free, which is what makes it safe to
-  // press twice. A read here would cost the very allowance the tool is protecting.
-  const body = src.slice(src.indexOf('async function pruneCdnMediaFromDb'));
-  assert.doesNotMatch(body.slice(0, 500), /\.get\(\)|fbGetObj|once\(/);
+test('nothing clears the database photo copies in bulk', () => {
+  /* "Free Database Space" removed the database copy of every photo in CDN_MEDIA_KEYS. It was
+     removed from the admin on 27 September 2026: the site reads the CDN copy first, so it saved
+     little, and the owner's rule is that nothing is deleted after going live. The database copy
+     is also the only one Firebase itself holds, if the CDN file were ever lost. */
+  assert.ok(!src.includes('pruneCdnMediaFromDb'), 'the bulk photo prune is back');
+  assert.doesNotMatch(src, /for\(const key of CDN_MEDIA_KEYS\)[\s\S]{0,120}\.remove\(\)/, 'something removes every CDN-backed photo');
 });

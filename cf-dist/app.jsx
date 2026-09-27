@@ -2111,14 +2111,6 @@ async function saveMediaItem(key,b64,tryStorage=true){
   }
   return true;
 }
-async function loadMediaItem(key){
-  // Check local (IndexedDB) cache first — avoids a 6-second Firebase timeout on every image load
-  const cached=await mediaGet("nemo-m-"+key); if(cached)return cached;
-  // Then the CDN copy, which costs the database nothing. See CDN_MEDIA_KEYS above.
-  const cdn=cdnMediaPath(key); if(cdn) return cdn;
-  if(FB_OK){ try{ const s=await withTimeout(FB_DB.ref("media/"+key).get(),6000); const v=s&&s.val(); if(v){ mediaSet("nemo-m-"+key,v); return v; } }catch(e){} }
-  return null;
-}
 /* Resolve a media key to something an <img src> can use, WITHOUT reading the database.
 
    hydrateMedia pulls every gallery image of every product on boot, not just the ones on
@@ -2157,27 +2149,6 @@ async function loadImgLocal(id){
 async function delMediaItem(key){
   await mediaDel("nemo-m-"+key);
   if(FB_OK){ try{ await FB_DB.ref("media/"+key).remove(); }catch(e){} }
-}
-/* Drop the database copy of every image that now has a file on the CDN.
-
-   `media` is 20.2 MB of a 20.8 MB database — base64 photos and posters, kept there because
-   Firebase Storage needs a paid plan. Once a copy is in assets/media/ the database one is dead
-   weight: every reader checks the CDN first (see CDN_MEDIA_KEYS), so deleting it changes
-   nothing on screen and frees almost the whole database.
-
-   Only keys in that list are touched, and the list is generated from the directory with a test
-   that fails the build if it drifts — so there is no way to delete an image the CDN does not
-   have. Nothing is read: remove() on a path that is already gone is a no-op, which also makes
-   pressing this twice free. Anything uploaded since the migration is not in the list and is
-   left exactly where it is. */
-async function pruneCdnMediaFromDb(onProgress){
-  if(!FB_OK||!FB_DB) return 0;
-  let done=0;
-  for(const key of CDN_MEDIA_KEYS){
-    try{ await FB_DB.ref("media/"+key).remove(); }catch(e){}
-    if(onProgress) onProgress(++done, CDN_MEDIA_KEYS.length);
-  }
-  return done;
 }
 /* Compress an image file to a JPEG data-URL (keeps RTDB + sync light) */
 function compressImage(file, maxDim=1100, quality=0.82){
@@ -8358,7 +8329,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.4afb1f6e";
+const APP_BUILD = "v90.5957e581";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -14793,54 +14764,6 @@ function NemoStore(){
     }
     return {done,refused};
   };
-  /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
-     so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
-       • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
-       • Paid (Storage on): images move to Storage and their URL + thumbUrl get embedded.
-     Purely additive — full-size images are never deleted. */
-  const backfillThumbs=async(onProgress)=>{
-    let done=0;
-    for(const p of products){
-      if(!Array.isArray(p.media)||!p.media.length) continue;
-      const firstImgKey=(p.media.find(m=>m.type!=="video")||{}).key;
-      let changed=false; const patch={}; const newMedia=[];
-      for(const m of p.media){
-        const entry={...m};
-        const isThumbTarget = m.key===firstImgKey;   // only the 1st image becomes the thumbnail
-        /* Not mediaCache: since boot resolves images to CDN/Worker URLs rather than base64,
-           the cache no longer holds bytes, and makeThumb needs the real ones. */
-        const cur = m.url || await loadMediaItem(m.key);
-        // Embed an existing Storage URL on the record (cheap, kills a per-image DB read).
-        if(typeof cur==="string" && /^https?:/.test(cur) && !entry.url){ entry.url=cur; changed=true; }
-        // Generate a thumbnail ONLY for the first image, and only if it doesn't have one yet.
-        if(isThumbTarget && !entry.thumb && !entry.thumbUrl && typeof cur==="string"){
-          if(FB_STORAGE && /^https?:/.test(cur)){
-            const t=await makeThumbFromAny(cur);
-            if(t){ const tu=await uploadToStorage("media/"+m.key+"_thumb.jpg",t); if(tu){ entry.thumbUrl=tu; entry.thumb=1; patch["thumb-"+m.key]=t; changed=true; } }
-          } else if(cur.startsWith("data:")){
-            if(FB_STORAGE){
-              const r=await persistImage(m.key, cur, true);
-              if(r.url){ entry.url=r.url; changed=true; if(r.url_thumb) entry.thumbUrl=r.url_thumb; }
-              if(r.thumbData){ entry.thumb=1; patch["thumb-"+m.key]=r.thumbData; changed=true; }
-            } else {
-              const t=await makeThumb(cur);
-              if(t){ await saveMediaItem(m.key+"_thumb", t); entry.thumb=1; patch["thumb-"+m.key]=t; changed=true; }
-            }
-          }
-        }
-        newMedia.push(entry);
-      }
-      if(changed){
-        const saved={...p,media:newMedia};
-        setProducts(prev=>{ const next=prev.map(x=>x.id===saved.id?saved:x); saveProd(next); return next; });
-        setMediaCache(c=>({...c,...patch}));
-        done++;
-      }
-      if(onProgress) onProgress(done);
-    }
-    return done;
-  };
-
   // Keep each product's rating/count in sync with its REAL reviews
   const recomputeProductRating=(pid, reviews)=>{
     const count=reviews.length;
@@ -15547,7 +15470,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

@@ -44,14 +44,11 @@ It is not in `CDN_MEDIA_KEYS`, so every visitor downloads it from the database. 
 harmless; a few dozen rebuilds the problem. **Roughly monthly, or after adding several
 products or guides:**
 
-**Press Admin → Free Database Space → Clear old photo copies FIRST, before step 1.** That button
-deletes the database copy of every image already on the CDN, which leaves `media` holding exactly the
-photos that still need migrating — and step 2 below decodes everything in the export it is given. Run
-the export while the old copies are still there and you re-download all of them, re-compress them at
-quality 60, and upload them back over the `assets/media/` files they came from. Nothing breaks, the
-keys are identical and the list does not change, but every one of those photos loses a generation of
-JPEG quality for no reason. Prune first and the export is the backlog, which is what the rest of this
-routine assumes.
+**Always run step 2 with `--repo`.** The export holds every photo in `media`, including the 83 that
+already have a file in `assets/media/` — their database copies are kept on purpose (see *Storage*
+below). `--repo` makes the script skip any key that already has a file there. Without it those 83 are
+decoded, re-compressed at quality 60 and uploaded back over the files they came from: nothing breaks
+and no test fails, but every one of them loses a generation of JPEG quality for no reason.
 
 1. Firebase Console → Realtime Database → `media` → ⋮ → **Export JSON**
 2. Decode and shrink them with `scripts/shrink-media.py`, from the folder holding the export:
@@ -157,11 +154,11 @@ Of that 20.8 MB, **`media` is 20.2 MB** — 97%. Everything else in the database
 roughly 250 KB (a 1100px JPEG, base64, which adds a third). At that rate storage has room for
 thousands more pictures. It is not the constraint; downloads are.
 
-The 83 images that now have a file in `assets/media/` no longer need their database copy — every
-reader consults the CDN first. **Admin → Settings → Free Database Space** clears exactly those and
-nothing else, which takes the database from 20.8 MB to under 1 MB. It walks `CDN_MEDIA_KEYS`, so
-it cannot touch an image that has nowhere else to come from, and it reads nothing, so pressing it
-twice is free.
+The 83 images that have a file in `assets/media/` keep their database copy. Every reader consults
+the CDN first, so those copies cost downloads nothing — only storage, and storage is not the
+constraint. An admin button that deleted them ("Free Database Space") was removed on 27 September
+2026: it saved space the plan has plenty of, and the database copy is the only one Firebase itself
+holds if a CDN file is ever lost.
 
 Nodes that grow forever, all tiny today, none worth acting on yet:
 

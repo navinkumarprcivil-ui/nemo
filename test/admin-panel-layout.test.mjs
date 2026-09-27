@@ -33,12 +33,21 @@ test('the maintenance tools are not filed under Email & Security', () => {
      under that tab put the two least reversible buttons in the store beside the admin password,
      on a tab someone opens for an unrelated reason. */
   const body = lines.slice(tools.at, tools.end).join('\n');
-  for (const panel of ['Data & Backup', 'Free Database Space', 'Clear Cached Copies']){
+  for (const panel of ['Data & Backup', 'Clear Cached Copies']){
     assert.ok(body.includes(`title="${panel}"`), `"${panel}" is not in the Maintenance section`);
   }
   const emails = secs.find(s => s.name === 'emails');
   const emailBody = lines.slice(emails.at, emails.end).join('\n');
-  assert.ok(!emailBody.includes('Free Database Space'), 'the database prune is back under Email & Security');
+  assert.ok(!emailBody.includes('Clear Cached Copies'), 'a maintenance tool is back under Email & Security');
+});
+
+/* Removed on 27 September 2026 as buttons with nothing left to do. Speed Up Catalog made the
+   catalogue thumbnail the product editor already makes on every save; Free Database Space
+   deleted database copies of photos the site reads from the CDN instead. */
+test('the two retired maintenance buttons stay gone', () => {
+  for (const gone of ['Speed Up Catalog', 'Free Database Space', 'backfillThumbs', 'Optimise Catalog Images']){
+    assert.ok(!app.includes(gone), `"${gone}" is back in app.jsx`);
+  }
 });
 
 test('live-fish packing settings are hidden while live fish are off', () => {

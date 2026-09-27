@@ -206,7 +206,8 @@ this repository — `android-twa/README.md` lists what must stay out of git.
 Each of these was considered and dropped on purpose. They are listed so a later reader does not
 mistake them for oversights.
 
-- The Free Database Space prune.
+- The Free Database Space prune — the button itself was removed on 27 September 2026, with Speed Up
+  Catalog. The database keeps its copies of the 83 CDN photos.
 - The three code gaps from the testers' report: the onboarding walkthrough, email sign-in, the FAQ.
 - Padding the app to 20 MB.
 - The narrow screenshot in `manifest.webmanifest`.
