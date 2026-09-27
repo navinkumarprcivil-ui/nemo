@@ -262,84 +262,99 @@ which is exactly why the second tap always worked. Cancelling throws
 who dismissed the picker deliberately. Customers no longer see Java class names; the exception
 goes to Logcat under `NemoAuth` instead.
 
-### Edge-to-edge is not settled — and the earlier note here was wrong
+### The three release-dashboard flags cannot be closed. Stop trying.
 
-Release 13 drew two flags: *Edge-to-edge may not display for all users* and *deprecated APIs or
-parameters for edge-to-edge*. This section used to say both were closed by bumping Material
-1.10.0 → 1.14.0 in `gradle/libs.versions.toml`. **Release 14 shipped that bump and Play raised
-both flags again, against 14.** The bump was not the fix; do not assume a dependency version
-closed a Play flag until a release carrying it comes back clean.
+Settled against release 16 on 27 September 2026, after three releases of getting this wrong. The
+flags are *Edge-to-edge may not display for all users*, *Your app uses deprecated APIs or parameters
+for edge-to-edge*, and *Improve your app's performance with bitmap image optimisation*. **Every class
+Play names belongs to a library.** There is nothing in this project to change, and no dependency
+version that will clear them.
 
-What is actually true of each half:
+**First, the trap that made 15 look clean.** These flags live in the **release dashboard**, which
+Play produces after it analyses the bundle. The **upload screen** shows something else — for 15 it
+showed only the native-debug-symbols warning, and that was read as the edge-to-edge flags being
+gone. They were never gone; nobody had looked in the right place. A clean upload screen says nothing
+about them. Check the release dashboard, on the release, after processing finishes.
+
+**The mapping file for 16**, which carries `activityKtx = "1.13.0"`:
+
+```
+androidx.activity.EdgeToEdgeApi23 -> ll:
+androidx.activity.EdgeToEdgeApi26 -> ml:
+androidx.activity.EdgeToEdgeApi29 -> ol:
+androidx.activity.EdgeToEdgeApi35 -> ql:
+androidx.core.view.accessibility.AccessibilityNodeInfoCompat$$ExternalSyntheticApiModelOutline0 -> e0:
+```
+
+Play reported `ll.b`, `ml.b`, `ol.b`, `ql.b` and `e0.m`. Four are androidx.activity's own
+implementation of `enableEdgeToEdge()`; the fifth is a synthetic outline class D8 generates for
+API-model desugaring, which is tooling output, not anybody's source.
+
+**`EdgeToEdgeApi35` is the proof the bump landed.** That class does not exist in 1.8.0. 15 and 16
+really are running the reworked code — and it still calls the deprecated APIs.
+
+**Why no version will fix it, which is the part worth understanding.** `EdgeToEdgeApi23`, `Api26`
+and `Api29` are the branches that run on Android 6, 8 and 10. On those versions
+`Window.setStatusBarColor` and `setNavigationBarColor` are *the* way to do this; there is no
+alternative to migrate to. Play's check is static — it sees every branch in the bundle, not the one
+that runs on the reviewer's device. So the flag is raised by backward-compatibility code, and that
+code is in the bundle **because `minSdk` is 24**. The flag cannot be closed while this app supports
+Android 7. Not by a newer androidx.activity, and not by writing the calls by hand, which would mean
+making the same deprecated calls with the library's protection removed.
+
+`LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES` is the same story. It appears nowhere in
+`app/src/main/` — source or theme, checked with a recursive grep that returned nothing — so
+`enableEdgeToEdge()` sets it, as it must to draw into a cutout.
+
+**And there is now a real tension with Google's advice, worth stating plainly.** The recommendation
+is to go edge-to-edge and handle the insets. Version 15 and 16 do the opposite on purpose: the inset
+listener pads the WebView by the navigation bar and consumes the insets, so the page is not under the
+bar at all. That is what fixed the overlap, after ten attempts at the edge-to-edge way. The app is
+correct and Play's check will keep asking. Both of those stay true.
 
 **The display half is handled, but only where a customer can see it.** `viewport-fit=cover` in
-`index.html` makes the `env(safe-area-inset-*)` values real and `app.jsx` spends them on the
-header, the bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 15
-phone against version code 14 — header and camera cutout, bottom nav against the gesture pill,
-the floating cart bar, a bottom sheet, and landscape: nothing clipped, nothing hidden. Play
-cannot see any of that.
+`index.html` makes `env(safe-area-inset-*)` real and `app.jsx` spends it on the header, the bottom
+nav, the floating cart bar and every bottom sheet. Checked on an Android 15 phone — header and camera
+cutout, bottom nav against the gesture pill, the floating cart bar, a bottom sheet, landscape:
+nothing clipped, nothing hidden. Play cannot see any of that.
 
-**And the second wrong note: `enableEdgeToEdge()` is already there.** This section used to say
-the flag would keep returning until `MainActivity` called it. It has called it since before
-release 14 — `MainActivity.kt:120`, imported at line 24 — so release 14 both calls it and is
-flagged for it. Adding the call is not the fix either, because there is nothing to add.
-
-**Both halves are one problem, and it is a pinned version.** `mapping.txt` for release 14:
-
-```
-androidx.activity.EdgeToEdgeApi23 -> wk:
-androidx.activity.EdgeToEdgeApi26 -> xk:
-androidx.activity.EdgeToEdgeApi29 -> yk:
-```
-
-`wk`, `xk` and `yk` — the three classes Play names for the deprecated
-`setStatusBarColor`/`setNavigationBarColor` calls — are **androidx.activity's own implementation
-of `enableEdgeToEdge()`**. The deprecated calls are made by the library, on this app's behalf,
-every time that one line runs. And `gradle/libs.versions.toml` pins
-`activityKtx = "1.8.0"`, which is years old; the newer releases reworked exactly this code.
-
-So the only lever for either flag is that version. The theme is not at fault and was checked:
-`Theme.Material3.DayNight.NoActionBar` with no `statusBarColor`, no `navigationBarColor` and no
-`windowOptOutEdgeToEdgeEnforcement`. `targetSdk` is 36.
-
-Which is also why *may not display for all users* survives a build that does call
-`enableEdgeToEdge()`: Play's static check does not recognise what 1.8.0 emits.
-
-Pick the current stable androidx.activity at build time rather than a number written down here,
-and — the rule this section exists to enforce — **the bump is a hypothesis until release 15
-comes back clean.** A dependency bump made on a guess is how the wrong conclusion got into this
-file twice.
+**The rule this section exists to enforce, now on its third iteration.** 13 was flagged. 14 shipped
+Material 1.10.0 → 1.14.0 and was flagged again. 15 and 16 shipped activityKtx 1.8.0 → 1.13.0 and
+were flagged again. Twice this file recorded a bump as the fix before a release carrying it came
+back. **Do not bump a dependency to chase one of these flags, and do not record a flag as closed
+until the release dashboard of a release carrying the change says so.** Read `mapping.txt` first; it
+answers the question in one command.
 
 How to redo the lookup on a later release, with the pattern that actually works — Play writes
-`class.method`, so `wk.a` is method `a` of class `wk`, and grepping for a class *named* `wk.a`
-finds nothing and looks like a clean bill of health:
+`class.method`, so `ll.b` is method `b` of class `ll`, and grepping for a class *named* `ll.b` finds
+nothing and looks like a clean bill of health:
 
 ```
-grep -E ' -> (wk|xk|yk):$' app/build/outputs/mapping/release/mapping.txt
+grep -E ' -> (ll|ml|ol|ql|e0):$' app/build/outputs/mapping/release/mapping.txt
 ```
 
-### One more flag on 14: bitmap decoding
+Substitute whatever names the new report gives. The obfuscated names change on every build; only the
+method comes back the same.
 
-*Improve your app's performance with bitmap image optimisation* — a manual
-`BitmapFactory.decodeStream` in `al0.G`, fed by `HttpURLConnection.getInputStream` in `ag0.O`.
+### The bitmap flag is Firebase Auth fetching the profile photo
 
-The mapping file settles this one too, and the answer is stranger than a library name:
+*Improve your app's performance with bitmap image optimisation*, reported against 16 as a
+`BitmapFactory.decodeStream` in `c41.u` fed by `HttpURLConnection.getInputStream` in `vm0.W`.
 
 ```
-_COROUTINE._BOUNDARY            -> al0:
-kotlin.jvm.internal.TypeIntrinsics -> ag0:
+com.google.android.gms.internal.firebase-auth-api.zzoq -> c41:
+_COROUTINE._BOUNDARY                                   -> vm0:
 ```
 
-Neither is a class that decodes anything. `_COROUTINE._BOUNDARY` is a synthetic marker Kotlin
-inserts so a coroutine's stack trace can be reassembled across a suspension point, and
-`TypeIntrinsics` is runtime plumbing for cast checks. Play is reporting **coroutine boundary
-frames**, which is what a stack looks like when the decode happens inside somebody's `suspend`
-function. So the call is real but the class names lead nowhere, and there is no file in this
-project to open.
+**`zzoq` is Firebase Auth.** The download is the Google account's profile picture, fetched after
+sign-in; `_COROUTINE._BOUNDARY` is the synthetic marker Kotlin inserts so a stack trace can be
+reassembled across a suspension point, which is what the calling frame looks like when the work
+happens inside a `suspend` function.
 
-That matches the rest of the evidence: this app loads no bitmaps of its own, and a WebView
-decodes images in native code without touching `BitmapFactory`. Leave it. An image-loading
-library cannot be added to code this project does not own.
+This is better evidence than release 14 produced, where both names came back as coroutine plumbing
+and the conclusion had to rest on "this app loads no bitmaps of its own". Now the owner is named, and
+the answer is the same: an image-loading library cannot be added to code this project does not own.
+The cost is one small photo, once per signed-in session. Leave it.
 
 ### Printing, and why sharing the PDF as a file is not possible
 
@@ -470,10 +485,13 @@ clear; the flag-clearing is the cheapest item below, not the reason for the rele
    `MainActivity` and `mapping.txt` showed 1.8.0's own `EdgeToEdgeApi23/26/29` making the
    deprecated calls Play flags. A five-minor jump that needed nothing else moved with it —
    `coreKtx` 1.10.1, `appcompat` 1.6.1 and `material` 1.14.0 all stayed where they were.
-   **Half proven since.** The bars were checked on an Android 14 emulator and are correct in both
-   navigation modes — see *The edge-to-edge bump is no longer a hypothesis* below, which also
-   records the navigation-bar overlap that check turned up. What is still unproven is Play's own
-   report on 15 coming back without both edge-to-edge actions.
+   **Half proven, and the other half is now disproven.** The bars were checked on an Android 14
+   emulator and are correct in both navigation modes, which is the half that mattered — that check
+   is also what turned up the navigation-bar overlap. Play's report did **not** come back clean:
+   release 16 raises both edge-to-edge actions again, and `mapping.txt` shows 1.13.0's own
+   `EdgeToEdgeApi23/26/29/35` making the deprecated calls exactly as 1.8.0 did. The bump was worth
+   making and it did not close the flags; nothing will, while `minSdk` is 24. See *The three
+   release-dashboard flags cannot be closed* above.
 3. **A monochrome notification icon.** `res/drawable/ic_notification.xml`, a flat white fish
    silhouette, replacing `R.mipmap.ic_launcher` at `NemoMessagingService`. Android keeps only the
    alpha channel and tints the result, so the full-colour launcher icon was arriving as a
@@ -674,8 +692,14 @@ change, described in full above.
 point of this step: R8 and the upload key are not in the debug build, so nothing about a debug pass
 carries over on its own. Checked and passing: the bottom navigation in both gesture and 3-button
 modes; Google sign-in; the native share sheet; the WhatsApp hand-off; Print → Save as PDF; the push
-notification with the fish icon; and the payment sheet. Play's release report came back with the
-two edge-to-edge actions gone and only the native-debug-symbols warning left, which is advisory.
+notification with the fish icon; and the payment sheet.
+
+**Play's release dashboard for 16 recommends three actions, and all three are permanently open.**
+Both edge-to-edge flags and the bitmap-decoding flag name library classes only — confirmed against
+`mapping.txt` for this exact build. Nothing here is this project's to fix; see *The three
+release-dashboard flags cannot be closed* above for the evidence and for why no dependency version
+will change it. An earlier note in this file said 15 came back clean on the edge-to-edge pair. It
+did not; the upload screen had been mistaken for the release dashboard.
 
 ### Why the release build had to be checked separately
 
