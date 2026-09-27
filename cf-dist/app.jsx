@@ -8402,7 +8402,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.cb94647d";
+const APP_BUILD = "v90.0845b31e";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -8461,42 +8461,6 @@ if(typeof window!=="undefined"){
   // A PWA tab can sit backgrounded for days and is reopened rather than reloaded, so the
   // load event alone would never fire again. Re-check when it comes back to the front.
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) checkForUpdate(); });
-}
-
-/* ═══════════════════ THE ANDROID NAVIGATION BAR ═══════════════════ */
-/* An edge-to-edge WebView is laid out behind the system navigation bar, and
-   the CSS environment variable for the bottom inset reports the padding the WebView was
-   given — which is zero for exactly that reason. So the page cannot measure the bar itself,
-   and the app has to tell it. The first attempt had Android push the value in with
-   evaluateJavascript whenever the insets changed, and it did not hold: a reload builds a new
-   document and documentElement.style goes with the old one, while the insets have not changed
-   and so nothing fires to set it again. Asking is the shape that survives — a reload asks, and
-   a rotation or a switch to gesture navigation fires resize and asks again.
-
-   Everything here is a no-op in a browser and in an older app build whose bridge has no
-   bottomInset: --safe-b then falls back to the environment variable, which is correct
-   everywhere the page is not behind a navigation bar. */
-function syncAndroidNavInset(){
-  try{
-    const b=(typeof window!=="undefined"&&window.NemoAndroid)||null;
-    if(!b||typeof b.bottomInset!=="function") return;
-    const px=Number(b.bottomInset());
-    /* A navigation bar is tens of pixels. Anything outside that is a reading taken before the
-       insets were delivered, or a number we do not understand, and the environment variable is
-       a better answer than a guess. */
-    if(!Number.isFinite(px)||px<0||px>200) return;
-    document.documentElement.style.setProperty("--nemo-nav-inset",px+"px");
-  }catch(e){ /* no bridge, or it threw — leave --safe-b on the environment variable */ }
-}
-if(typeof window!=="undefined"){
-  syncAndroidNavInset();
-  /* The insets can be delivered after the bundle first runs, so ask again once the page is
-     up rather than trusting the very first reading. */
-  if(document.readyState==="complete") setTimeout(syncAndroidNavInset,0);
-  else window.addEventListener("load",()=>setTimeout(syncAndroidNavInset,0));
-  window.addEventListener("resize",syncAndroidNavInset);
-  window.addEventListener("orientationchange",syncAndroidNavInset);
-  document.addEventListener("visibilitychange",()=>{ if(!document.hidden) syncAndroidNavInset(); });
 }
 
 /* ═══════════════════ CATEGORY DRAWER (left slide-in) ═══════════════════ */

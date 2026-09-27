@@ -548,82 +548,79 @@ Its own `cleanupLegacyFixes()` is the clearest evidence: it deletes the debris o
 several `data-nemo-*-lifted` attribute families. **Ten generations of this fix, each cleaning up
 after the last.** A v15 entry in that list, inside a v15 build, is the whole story.
 
-**The first fix, and why it did not ship.** `systemBars.bottom` instead of `0`, and the hack
-turned off:
+**The fix that shipped.** The root view is padded by the bar's height, the hack is off, and the
+strip behind the buttons is painted white so it reads as part of the nav:
 
 ```kotlin
 private val nativeLayoutFixEnabled = false      // new, immediately above the function
 
-private fun installNativeLayoutFix(view: WebView?) {
-    if (!nativeLayoutFixEnabled) return
-    ...
-}
+view.setBackgroundColor(android.graphics.Color.WHITE)
+view.setPadding(systemBars.left, systemBars.top, systemBars.right, currentBottomInsetPx())
 ```
 
-That ended the overlap — verified on the Pixel 7 API 34 AVD in 3-button mode, and on API 33 — and
-it cost too much to keep. Padding the root view stops the WebView extending under the bar, so the
-strip behind the system buttons shows the **window background** instead of the page. On the Pixel
-that is a thin white line. On the vivo I2301 it is a tall slab of empty white under the nav, wide
-enough that the app looks broken. A fix that trades a collision for a slab is not a fix.
+**The measurement is the part that matters.** `systemBars.bottom` is not reliable. On the vivo
+I2301 it reports **0** during startup — as does `navigationBars()` — while `tappableElement()`
+already holds the true 116px. A few seconds later all three agree. The original code read
+`systemBars.bottom` once inside that early window, cached the zero, and never looked again, so the
+page was told there was no bar at all for the life of the process:
 
-**The fix that shipped.** The padding goes back to `0`, the WebView stays edge-to-edge, and the
-page is simply **told how tall the bar is**. One CSS custom property carries it:
+```
+sys=0   nav=0   tap=116  -> 42 css px
+sys=116 nav=116 tap=116  -> 42 css px
+```
+
+`currentBottomInsetPx()` reads all three live on every call and takes the largest. Zero never wins
+a `max`, so a device whose preferred type is not yet populated falls through to one that is. Both
+Pixel AVDs populate `systemBars()` before the listener first runs, which is exactly why they were
+never affected and why this survived every emulator check.
+
+**Verified** on API 33, 34 and 36 AVDs in both gesture and 3-button navigation, and on the vivo
+I2301 (API 35) in 3-button.
+
+### What was tried first, and why it was abandoned
+
+Two earlier approaches are worth recording, because both look better on paper than what shipped.
+
+**Padding without the background.** The same `setPadding`, but leaving the root view's default
+background. It ended the overlap everywhere, including the vivo — and exposed the window background
+behind the buttons: a thin white line on the Pixels, a tall empty slab on the vivo. The slab is
+what sent this down the next path.
+
+**A CSS custom property.** Keep the WebView edge-to-edge, pad nothing, and hand the page the bar's
+height so it offsets its own controls:
 
 ```css
 :root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 ```
 
-Every one of the 18 bottom-anchored rules in `app.jsx` now reads `var(--safe-b)`; exactly one raw
-`env()` call survives, inside that definition, and a test asserts that. `max()` is what makes it
-safe everywhere: in a browser, or in an app build that never sets the property, `--nemo-nav-inset`
-is missing, the fallback is `0px`, and the environment variable wins — which is the correct answer
-on every platform that is not an edge-to-edge WebView.
+All 18 bottom-anchored rules in `app.jsx` read `var(--safe-b)`, and **that part is still in place**
+— it is correct in a browser and in the PWA, where the environment variable is the right answer and
+the custom property is simply unset.
 
-**Pull, not push.** The first attempt at setting it had Kotlin inject the value from the inset
-listener:
+What could not be made to work was Android setting the property. Injecting it from the inset
+listener does not survive a reload, because a reload builds a new `documentElement` while the insets
+have not changed, and the store reloads itself whenever it sees a new build. Having the page pull it
+through a `@JavascriptInterface` method fixed that on the AVDs. On the vivo it never worked: the
+property was confirmed present on `documentElement` in DevTools, the bridge was confirmed being
+called from the page, and forcing the injected value to an absurd **120px moved the layout not one
+pixel**. The page was receiving the value and ignoring it, and after four rounds the cause was still
+unknown.
 
-```kotlin
-view?.evaluateJavascript(
-    "document.documentElement.style.setProperty('--nemo-nav-inset','${navInset}px')", null)
-```
-
-The overlap came straight back. An injected inline style lives on `documentElement`, and a reload
-builds a new `documentElement` — while the insets have **not** changed, so the listener never fires
-again and nothing re-sets it. The store reloads itself on purpose whenever it sees a new build
-(`checkForUpdate` → `forceRefresh`), so the property was being wiped by design. The same race
-exists on a cold start: insets are often delivered before the bundle has run.
-
-So the page asks instead. `bottomInset()` on the existing `AndroidShareBridge`, read at module
-scope in `app.jsx` and again on `load`, `resize`, `orientationchange` and `visibilitychange` — the
-events that can change the answer. A reload asks; rotating asks; switching between gesture and
-3-button navigation fires `resize` and asks. Nothing has to be kept in sync, because nothing is
-stored. R8 keeps `@JavascriptInterface` methods by annotation, so the new method needed no keep
-rule.
-
-**The injection stays.** Not as the mechanism, but as the other half of it. The two cover opposite
-cases: the pull handles a page that reloaded *after* the insets settled, and the push handles insets
-that arrive *after* the page loaded — a cold start, where the listener fires and the page has
-already finished asking. Neither is redundant and they cannot disagree, because both write the same
-property from the same field. `bottomInset()` simply returns `systemBottomInsetCssPx`, the value the
-listener already maintains.
-
-**What this leaves.** The page sits behind the navigation bar, as an edge-to-edge app should, and
-its own content clears it. No window background is exposed, so there is no slab and no white line.
-The status bar at the top is a separate matter and is **not** addressed here: it still shows the
-window background against the page's white.
+That is why the native route won. It is blunter, it gives up drawing behind the bar, and it depends
+on nothing the web layer has to honour.
 
 A `private val` rather than a `const` for `nativeLayoutFixEnabled` is deliberate — Kotlin then does
 not flag the body as unreachable, so it compiles without a warning. **The dead body should be
-deleted**, but as its own change, not mixed into this one.
+deleted**, but as its own change.
 
-### The edge-to-edge bump is no longer a hypothesis, below Android 15
+### Pushing to main deploys the live site
 
-`activityKtx` 1.8.0 to 1.13.0 was recorded above as unproven, with the bars below 15 untested,
-because the only device to hand ran Android 15 — where `targetSdk` 36 forces edge-to-edge whatever
-the library does, so that check could not have caught a regression. A Pixel 7 API 34 AVD closes it:
-header clear of the status bar, nav clear of the navigation bar, list ends reachable, in both
-gesture and 3-button navigation. **Still open is Play's own report** on 15 coming back without both
-edge-to-edge actions, which is the half no emulator can answer.
+Established today, and contrary to the comment in `.github/workflows/deploy.yml` that says
+*"nothing deploys on its own from a push"*. Build `v90.cb94647d` was served by
+nemoaquastore.in while the newest run of that workflow was 47, carrying `v90.0845b31e`, and
+`quality.yml` has no deploy step. Something outside GitHub Actions — most likely Cloudflare's Git
+integration — builds and publishes `main` on every push. **The confirm box in the Actions tab is
+not the only gate.** Not yet confirmed in the Cloudflare dashboard.
 
 
 ## Still open
@@ -637,9 +634,12 @@ edge-to-edge actions, which is the half no emulator can answer.
   once a release has shipped with `nativeLayoutFixEnabled = false` and nobody has missed it.
 - The status bar strip at the top shows the window background against the page's white. Same
   underlying cause as the navigation bar had, on the other edge, and not yet fixed.
-- Nothing below API 33 has been looked at. `minSdk` is 24, the inset fix is structural rather than
-  version-dependent, and 33 shares an `EdgeToEdge` implementation with 34 — but that is reasoning,
-  not a test.
+- Nothing below API 33 has been looked at. `minSdk` is 24 and the fix is structural rather than
+  version-dependent — but that is reasoning, not a test.
+- Why the vivo's WebView ignored `--nemo-nav-inset` is still unknown. It does not matter while the
+  padding is native, but it would matter again if anyone moves the offset back into CSS.
+- `setWebContentsDebuggingEnabled(true)` is now called under `BuildConfig.DEBUG`, so `chrome://inspect`
+  reaches the WebView in debug builds and never in release.
 
 Cleared in 15: the cleartext-traffic attribute, and the notification's small icon.
 
