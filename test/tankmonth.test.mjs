@@ -17,10 +17,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = readFileSync(join(root, "app.jsx"), "utf8");
 const code = src.slice(src.indexOf("const SHOWCASE_TTL"), src.indexOf("function loadTankStreakLocal("));
 const M = new Function("FB_OK", code + `
-  return {totmMonthOf,previousTotmMonth,adminRewardReminderPeriod,totmDayOf,totmMonthLabel,totmMonthEnd,tankVoteRewardOn,tankStreakRewardOn,showcaseImgs,voteCount,
+  return {totmMonthOf,previousTotmMonth,adminRewardReminderPeriod,totmWeekOf,totmMonthLabel,totmMonthEnd,tankVoteRewardOn,tankStreakRewardOn,showcaseImgs,voteCount,
           hasVotedForTank,totmStandings,totmMinVotes,totmEligible,
           showcaseExpiry,showcaseExpired,showcasePendingExpiry,showcasePendingExpired,showcaseHoursLeft,computeTankUploadStreak,monthUploadStats,tankMonthlyRows,replacementForApproval};`)(false);
-const {totmMonthOf,previousTotmMonth,adminRewardReminderPeriod,totmDayOf,totmMonthLabel,totmMonthEnd,tankVoteRewardOn,tankStreakRewardOn,showcaseImgs,voteCount,
+const {totmMonthOf,previousTotmMonth,adminRewardReminderPeriod,totmWeekOf,totmMonthLabel,totmMonthEnd,tankVoteRewardOn,tankStreakRewardOn,showcaseImgs,voteCount,
        hasVotedForTank,totmStandings,totmMinVotes,totmEligible,
        showcaseExpiry,showcaseExpired,showcasePendingExpiry,showcasePendingExpired,showcaseHoursLeft,computeTankUploadStreak,monthUploadStats,tankMonthlyRows,replacementForApproval}=M;
 /* Legacy ballot fixture: totmVotes/<month>/<entryId>/<day>/<voter> = true. */
@@ -78,17 +78,28 @@ test("monthly totals add votes across every approved daily image for one custome
   assert.equal(rows.find(row=>row.uid==="u2").votes,1);
 });
 
-test("only approved share days build a monthly streak and a missed day ends it", () => {
-  const approvedDays={u1:{
-    "2026-08-01":{ownerName:"Nila"},
-    "2026-08-02":{ownerName:"Nila"},
-    "2026-08-04":{ownerName:"Nila"},
+test("only approved share weeks build a monthly streak and a skipped week ends it", () => {
+  /* Keys are the Mondays the weeks began on. 03 and 10 are consecutive; 24 skips 17, so the
+     best run is two, not three. */
+  const approvedWeeks={u1:{
+    "2026-08-03":{ownerName:"Nila"},
+    "2026-08-10":{ownerName:"Nila"},
+    "2026-08-24":{ownerName:"Nila"},
   }};
-  const row=tankMonthlyRows([],{},approvedDays,"2026-08")[0];
+  const row=tankMonthlyRows([],{},approvedWeeks,"2026-08")[0];
   assert.equal(row.ownerName,"Nila");
   assert.equal(row.streak,2);
-  assert.deepEqual(row.uploadDays,["2026-08-01","2026-08-02","2026-08-04"]);
-  assert.equal(monthUploadStats(approvedDays.u1,"2026-08").best,2);
+  assert.deepEqual(row.uploadWeeks,["2026-08-03","2026-08-10","2026-08-24"]);
+  assert.equal(monthUploadStats(approvedWeeks.u1,"2026-08").best,2);
+});
+
+test("a week is named by its Monday, in IST", () => {
+  // A Sunday belongs to the week that began the previous Monday.
+  assert.equal(totmWeekOf(Date.parse("2026-08-16T12:00:00Z")),"2026-08-10");
+  // 18:30 UTC is midnight in India: the moment the next week starts, not the next UTC day.
+  assert.equal(totmWeekOf(Date.parse("2026-08-16T18:29:59Z")),"2026-08-10");
+  assert.equal(totmWeekOf(Date.parse("2026-08-16T18:30:00Z")),"2026-08-17");
+  assert.equal(totmWeekOf(Date.parse("2026-08-17T12:00:00Z")),"2026-08-17");
 });
 
 test("approving a replacement selects only the customer's current approved tank", () => {
@@ -144,10 +155,11 @@ test("new once-only ballots use the canonical bucket", () => {
   assert.ok(hasVotedForTank(a,"v1",votes));
 });
 
-test("a day key is the calendar day, not the month", () => {
-  assert.equal(totmDayOf(Date.parse("2026-08-14T18:29:59Z")), "2026-08-14");
-  assert.equal(totmDayOf(Date.parse("2026-08-14T18:30:00Z")), "2026-08-15");
-  assert.notEqual(totmDayOf(Date.parse("2026-08-14T00:00:00Z")), totmDayOf(Date.parse("2026-08-15T00:00:00Z")));
+test("a week key is a full date, and a straddling week belongs to its Monday's month", () => {
+  assert.match(totmWeekOf(Date.parse("2026-08-14T12:00:00Z")), /^\d{4}-\d{2}-\d{2}$/);
+  // Wed 2 Sep sits in the week that began Mon 31 Aug, so it scores in August. Filing it under
+  // both months would let one upload count twice.
+  assert.equal(totmWeekOf(Date.parse("2026-09-02T12:00:00Z")), "2026-08-31");
 });
 
 test("standings rank by votes, and a tie goes to whoever posted first", () => {
@@ -216,14 +228,17 @@ test("pending tank requests expire 24 hours after submission", () => {
   assert.equal(showcasePendingExpiry({approved:true,createdAt:"2026-08-17T08:00:00Z"}), 0);
 });
 
-test("daily tank uploads keep current and best streaks", () => {
-  const now = Date.parse("2026-08-17T12:00:00Z");
+test("weekly tank uploads keep current and best streaks", () => {
+  const now = Date.parse("2026-08-17T12:00:00Z");   // inside the week beginning Mon 17 Aug
   const streak = computeTankUploadStreak({
-    "2026-08-12": {entryId:"old"},
-    "2026-08-15": {entryId:"a"},
-    "2026-08-16": {entryId:"b"},
+    "2026-07-13": {entryId:"old"},                  // three weeks earlier: breaks the run
+    "2026-08-03": {entryId:"a"},
+    "2026-08-10": {entryId:"b"},
     "2026-08-17": {entryId:"c"},
   }, now);
-  assert.deepEqual(streak, {current:3,best:3,lastDay:"2026-08-17"});
-  assert.equal(computeTankUploadStreak({"2026-08-10":{}}, now).current, 0);
+  assert.deepEqual(streak, {current:3,best:3,lastWeek:"2026-08-17"});
+  // Last shared five weeks ago: it stays in `best` but is no longer a current streak.
+  assert.equal(computeTankUploadStreak({"2026-07-13":{}}, now).current, 0);
+  // Last week still counts as current — the week is the unit, so there is a week of grace.
+  assert.equal(computeTankUploadStreak({"2026-08-10":{}}, now).current, 1);
 });

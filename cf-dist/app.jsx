@@ -2428,12 +2428,15 @@ const DEFAULT_SETTINGS = { ownerWhatsapp:BUSINESS_WA, supporterWhatsapp:"", supp
   totmEnabled: false,
   totmMinVotes: 5,        // an entry cannot win on fewer votes than this
   totmRewardCoins: 200,   // coins credited to the winner once the admin verifies
-  tankUploadStreakTarget: 7, // legacy display target; tankMinStreak is the monthly reward gate
+  /* Weeks, and the streak resets at the start of each month — so a month holds four or five
+     chances and anything above five is a target nobody can reach. These were 7 when a streak was
+     counted in days. A store that already saved 7 keeps it: change it in Customer Tank Showcase. */
+  tankUploadStreakTarget: 3, // legacy display target; tankMinStreak is the monthly reward gate
   tankVoteRewardCoins: 200,
   tankStreakRewardCoins: 200,
   tankStreakRewardEnabled: true,
-  tankMinStreak: 7,
-  tankRewardRules: "Upload a clear photo of your own aquarium. Each approved photo can collect votes while it is live. Monthly vote totals add together across all of your approved photos. Upload on consecutive days to build a streak; the streak resets at the start of each month. You cannot vote for your own tank, and each customer can vote only once for each tank image. Reward coins are released only after the store verifies the monthly results.",
+  tankMinStreak: 3,
+  tankRewardRules: "Upload a clear photo of your own aquarium. You can share one photo a week. Each approved photo can collect votes while it is live. Monthly vote totals add together across all of your approved photos. Share in consecutive weeks to build a streak; the streak resets at the start of each month. You cannot vote for your own tank, and each customer can vote only once for each tank image. Reward coins are released only after the store verifies the monthly results.",
   /* Customer testimonials on the home page */
   testimonialsEnabled: true,
   /* Editable marketing copy (admin can change these from Settings; blank = use the built-in default) */
@@ -3188,8 +3191,18 @@ function showcaseImgs(x){
    The `_once` key is create-only, so a customer can vote for an entry exactly once while it is
    live. Older releases stored votes in daily buckets; readers still deduplicate those voters so
    historical repeat-day votes cannot inflate monthly rewards. */
-/* Monthly voting and upload streaks follow the store's Indian calendar. */
-function totmDayOf(ms){ return istDayKey(ms==null?Date.now():ms); }
+/* Monthly voting and upload streaks follow the store's Indian calendar.
+
+   A week is identified by the date of its Monday, in IST. That keeps the YYYY-MM-DD shape every
+   stored key, validation pattern and month-prefix filter in here already assumes, and it makes
+   "consecutive" a subtraction: two weeks are adjacent when their Mondays are seven days apart.
+   A week straddling a month boundary belongs to the month of its Monday — arbitrary, but it has
+   to land somewhere, and counting it twice would let one upload score in two months. */
+function totmWeekOf(ms){
+  const d=new Date((ms==null?Date.now():ms)+IST_OFFSET_MS);
+  const dow=(d.getUTCDay()+6)%7;                          // Monday 0 … Sunday 6
+  return new Date(d.getTime()-dow*86400000).toISOString().slice(0,10);
+}
 function voteCount(x,votes){
   const buckets=x&&votes&&votes[x.id];
   if(!buckets) return 0;
@@ -3223,47 +3236,47 @@ function totmEligible(entry,settings,votes){ return voteCount(entry,votes)>=totm
    Approved uploads are copied to tankMonthlyEntries with only their owner, dates and id; the
    base64 photos can still honour the 24-hour deletion promise. Votes remain create-only ballots
    and are summed across every approved entry belonging to the same customer. */
-function monthUploadStats(dates,month){
-  const monthDates={};
-  Object.keys(dates||{}).filter(day=>day.startsWith(month+"-")).forEach(day=>{ monthDates[day]=dates[day]; });
+function monthUploadStats(weeks,month){
+  const monthWeeks={};
+  Object.keys(weeks||{}).filter(week=>week.startsWith(month+"-")).forEach(week=>{ monthWeeks[week]=weeks[week]; });
   const [year,number]=month.split("-").map(Number);
   const monthEnd=Date.UTC(year,number,0,12,0,0);
   const anchor=month===totmMonthOf(Date.now())?Date.now():monthEnd;
-  const streak=computeTankUploadStreak(monthDates,anchor);
-  return {days:Object.keys(monthDates).sort(),current:streak.current,best:streak.best,lastDay:streak.lastDay};
+  const streak=computeTankUploadStreak(monthWeeks,anchor);
+  return {weeks:Object.keys(monthWeeks).sort(),current:streak.current,best:streak.best,lastWeek:streak.lastWeek};
 }
 function tankMonthlyRows(entries,votes,streaks,month){
   const rows={};
   const list=Array.isArray(entries)?entries:Object.values(entries||{});
   list.filter(Boolean).forEach(entry=>{
     const uid=entry.userUid||entry.uid; if(!uid) return;
-    const row=rows[uid]||(rows[uid]={uid,ownerName:entry.ownerName||entry.name||uid,entryIds:[],votes:0,uploadDays:[],streak:0,lastDay:"",firstApprovedAt:entry.approvedAt||entry.createdAt||""});
+    const row=rows[uid]||(rows[uid]={uid,ownerName:entry.ownerName||entry.name||uid,entryIds:[],votes:0,uploadWeeks:[],streak:0,lastWeek:"",firstApprovedAt:entry.approvedAt||entry.createdAt||""});
     if(entry.ownerName) row.ownerName=entry.ownerName;
     if(entry.id&&!row.entryIds.includes(entry.id)) row.entryIds.push(entry.id);
     if(entry.id) row.votes+=voteCount(entry,votes);
-    const uploadDay=entry.createdAt?totmDayOf(Date.parse(entry.createdAt)):"";
-    if(uploadDay.startsWith(month+"-")&&!row.uploadDays.includes(uploadDay)) row.uploadDays.push(uploadDay);
+    const uploadWeek=entry.createdAt?totmWeekOf(Date.parse(entry.createdAt)):"";
+    if(uploadWeek.startsWith(month+"-")&&!row.uploadWeeks.includes(uploadWeek)) row.uploadWeeks.push(uploadWeek);
     const at=entry.approvedAt||entry.createdAt||"";
     if(at&&(!row.firstApprovedAt||at<row.firstApprovedAt)) row.firstApprovedAt=at;
   });
   Object.entries(streaks||{}).filter(([,log])=>!!log).forEach(([key,log])=>{
     const uid=log.uid||key; if(!uid) return;
-    const dates=log.dates||log;
-    const stats=monthUploadStats(dates,month);
-    if(!stats.days.length&&!rows[uid]) return;
+    const weeks=log.weeks||log;
+    const stats=monthUploadStats(weeks,month);
+    if(!stats.weeks.length&&!rows[uid]) return;
     const row=rows[uid]||(rows[uid]={uid,ownerName:log.ownerName||uid,entryIds:[],votes:0,firstApprovedAt:""});
-    const dayName=Object.values(dates).find(Boolean)?.ownerName;
-    if((log.ownerName||dayName)&&row.ownerName===uid) row.ownerName=log.ownerName||dayName;
-    row.uploadDays=[...new Set([...(row.uploadDays||[]),...stats.days])].sort();
-    const approvedStats=computeTankUploadStreak(Object.fromEntries(row.uploadDays.map(day=>[day,true])),Date.parse(month+"-28T12:00:00Z"));
-    row.streak=Math.max(stats.best,approvedStats.best); row.lastDay=row.uploadDays[row.uploadDays.length-1]||stats.lastDay;
+    const weekName=Object.values(weeks).find(Boolean)?.ownerName;
+    if((log.ownerName||weekName)&&row.ownerName===uid) row.ownerName=log.ownerName||weekName;
+    row.uploadWeeks=[...new Set([...(row.uploadWeeks||[]),...stats.weeks])].sort();
+    const approvedStats=computeTankUploadStreak(Object.fromEntries(row.uploadWeeks.map(week=>[week,true])),Date.parse(month+"-28T12:00:00Z"));
+    row.streak=Math.max(stats.best,approvedStats.best); row.lastWeek=row.uploadWeeks[row.uploadWeeks.length-1]||stats.lastWeek;
   });
   Object.values(rows).forEach(row=>{
-    row.uploadDays=[...new Set(row.uploadDays||[])].sort();
-    row.streak=computeTankUploadStreak(Object.fromEntries(row.uploadDays.map(day=>[day,true])),Date.parse(month+"-28T12:00:00Z")).best;
-    row.lastDay=row.uploadDays[row.uploadDays.length-1]||row.lastDay||"";
+    row.uploadWeeks=[...new Set(row.uploadWeeks||[])].sort();
+    row.streak=computeTankUploadStreak(Object.fromEntries(row.uploadWeeks.map(week=>[week,true])),Date.parse(month+"-28T12:00:00Z")).best;
+    row.lastWeek=row.uploadWeeks[row.uploadWeeks.length-1]||row.lastWeek||"";
   });
-  return Object.values(rows).map(row=>({uploadDays:[],streak:0,lastDay:"",...row}))
+  return Object.values(rows).map(row=>({uploadWeeks:[],streak:0,lastWeek:"",...row}))
     .sort((a,b)=>b.votes-a.votes||b.streak-a.streak||String(a.firstApprovedAt||"").localeCompare(String(b.firstApprovedAt||""))||String(a.ownerName).localeCompare(String(b.ownerName)));
 }
 function replacementForApproval(showcase,item){
@@ -3299,17 +3312,20 @@ function showcaseHoursLeft(x,now){
   return exp>0?Math.max(0,Math.ceil((exp-(now||Date.now()))/3600000)):0;
 }
 function tankStreakKey(uid){ return "nemo-tank-streak-"+uid; }
-function computeTankUploadStreak(dates,nowMs){
-  const keys=Object.keys(dates||{}).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-  if(!keys.length) return {current:0,best:0,lastDay:""};
+/* Weeks, not days. A customer may share one tank photo a week, so a daily streak was unreachable
+   by construction — it could only ever have read 1. The keys are Monday dates, so adjacency is a
+   seven-day step, and a streak survives while the last upload was this week or last week. */
+function computeTankUploadStreak(weeks,nowMs){
+  const keys=Object.keys(weeks||{}).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  if(!keys.length) return {current:0,best:0,lastWeek:""};
   let run=1,best=1;
   for(let i=1;i<keys.length;i++){
     const a=new Date(keys[i-1]+"T00:00:00Z").getTime(), b=new Date(keys[i]+"T00:00:00Z").getTime();
-    run=(b-a===86400000)?run+1:1; best=Math.max(best,run);
+    run=(b-a===7*86400000)?run+1:1; best=Math.max(best,run);
   }
-  const last=keys[keys.length-1], today=totmDayOf(nowMs||Date.now());
-  const gap=(new Date(today+"T00:00:00Z")-new Date(last+"T00:00:00Z"))/86400000;
-  return {current:gap<=1?run:0,best,lastDay:last};
+  const last=keys[keys.length-1], thisWeek=totmWeekOf(nowMs||Date.now());
+  const gap=(new Date(thisWeek+"T00:00:00Z")-new Date(last+"T00:00:00Z"))/86400000;
+  return {current:gap<=7?run:0,best,lastWeek:last};
 }
 function loadTankStreakLocal(uid){
   try{ return JSON.parse(localStorage.getItem(tankStreakKey(uid))||"null"); }catch(e){ return null; }
@@ -3318,15 +3334,15 @@ async function loadTankUploadStreak(uid){
   if(FB_OK&&uid){
     try{
       const month=totmMonthOf(Date.now());
-      const s=await withTimeout(FB_DB.ref("tankApprovedDays/"+month+"/"+uid).get(),5000);
-      const dates=(s&&s.val())||{};
-      const st=computeTankUploadStreak(dates,Date.now());
-      const v={uid,month,dates,current:st.current,best:st.best,lastDay:st.lastDay};
+      const s=await withTimeout(FB_DB.ref("tankApprovedWeeks/"+month+"/"+uid).get(),5000);
+      const weeks=(s&&s.val())||{};
+      const st=computeTankUploadStreak(weeks,Date.now());
+      const v={uid,month,weeks,current:st.current,best:st.best,lastWeek:st.lastWeek};
       try{localStorage.setItem(tankStreakKey(uid),JSON.stringify(v));}catch(e){}
       return v;
     }catch(e){}
   }
-  return loadTankStreakLocal(uid)||{dates:{},current:0,best:0,lastDay:""};
+  return loadTankStreakLocal(uid)||{weeks:{},current:0,best:0,lastWeek:""};
 }
 /* Drop from the local copy anything the cloud no longer has. Only ids the cache already held are
    kept, so this never grows into a full mirror of everybody's base64 photos. */
@@ -3445,8 +3461,8 @@ async function approveShowcasePhoto(item,settings,showcase){
         ["tankMonthlyEntries/"+month+"/"+item.id]:history,
       };
       if(replaced){ writes["showcase/"+replaced.id]=null; writes["tankMedia/"+replaced.id]=null; }
-      const uploadedAt=Date.parse(item.createdAt)||now, uploadDay=totmDayOf(uploadedAt), uploadMonth=uploadDay.slice(0,7);
-      writes["tankApprovedDays/"+uploadMonth+"/"+item.userUid+"/"+uploadDay]={entryId:item.id,at:uploadedAt,approvedAt:now,ownerName:item.ownerName||"Aquarist"};
+      const uploadedAt=Date.parse(item.createdAt)||now, uploadWeek=totmWeekOf(uploadedAt), uploadMonth=uploadWeek.slice(0,7);
+      writes["tankApprovedWeeks/"+uploadMonth+"/"+item.userUid+"/"+uploadWeek]={entryId:item.id,at:uploadedAt,approvedAt:now,ownerName:item.ownerName||"Aquarist"};
       await FB_DB.ref().update(writes);
       ok=true;
     }catch(e){ ok=false; }
@@ -6455,7 +6471,11 @@ function TankShowcaseSection({showcase,user,settings,onSubmit,onVote,votes={},pr
   const mineApproved=user&&(showcase||[]).find(s=>s.userUid===user.uid&&showcaseApproved(s)&&!showcaseExpired(s,now));
   const mine=minePending||mineApproved;
   const previousMonth=previousTotmMonth(now);
-  const monthlyStreak=streak?monthUploadStats(streak.dates,month):null;
+  const monthlyStreak=streak?monthUploadStats(streak.weeks,month):null;
+  /* Whether this customer has already had a photo approved in the week now running. Read from
+     the approved-weeks log rather than from the gallery, because a photo approved three days ago
+     has already expired out of the gallery and would otherwise look like a free slot. */
+  const sharedThisWeek=!!(streak&&streak.weeks&&streak.weeks[totmWeekOf(now)]);
   const votesFor=e=>voteCount(e,votes);
   const showGallery = mode!=="upload";
   const showUpload  = mode!=="gallery" && !!user;
@@ -6481,6 +6501,10 @@ function TankShowcaseSection({showcase,user,settings,onSubmit,onVote,votes={},pr
   };
   const submit=async()=>{
     if(!preview.length){setNote("⚠ Please add at least one photo");return;}
+    /* One photo a week. Editing a submission that is still pending is not a second photo, so
+       that stays allowed. This is a courtesy, not a wall: the store approves every photo by
+       hand, which is where the limit is actually enforced. */
+    if(sharedThisWeek&&!minePending){ setNote("⚠ One tank photo a week — you can share again on Monday"); return; }
     const finalName=(user?.name||ownerName||"Aquarist").trim();
     setUploading(true);
     try{
@@ -6576,7 +6600,7 @@ function TankShowcaseSection({showcase,user,settings,onSubmit,onVote,votes={},pr
           </div>
           {streakReward&&streak&&(
             <div style={{fontSize:11,color:"#9a3412",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:12,padding:"8px 10px",marginBottom:9,lineHeight:1.45}}>
-              🔥 <b>{Number(monthlyStreak&&monthlyStreak.current)||0}-day streak</b> · Best {Number(monthlyStreak&&monthlyStreak.best)||0}
+              🔥 <b>{Number(monthlyStreak&&monthlyStreak.current)||0}-week streak</b> · Best {Number(monthlyStreak&&monthlyStreak.best)||0}
             </div>
           )}
           {preview.length>0&&(
@@ -8335,7 +8359,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.d36183c9";
+const APP_BUILD = "v90.59597c49";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -14465,7 +14489,7 @@ function NemoStore(){
     if(!isStreak&&!tankVoteRewardOn(settings)){ showToast("The Tank of the Month reward is turned off in Settings","error"); return null; }
     const pts=Math.max(0,Number(isStreak?settings.tankStreakRewardCoins:(settings.tankVoteRewardCoins??settings.totmRewardCoins))||0);
     const minimum=Math.max(1,Number(settings.tankMinStreak||settings.tankUploadStreakTarget)||1);
-    if(isStreak&&Number(row.streak)<minimum){ showToast(`Minimum ${minimum}-day streak not met`,"error"); return null; }
+    if(isStreak&&Number(row.streak)<minimum){ showToast(`Minimum ${minimum}-week streak not met`,"error"); return null; }
     if(!isStreak&&Number(row.votes)<=0){ showToast("No valid votes to reward","error"); return null; }
     if(pts>0){
       const ok=await adminCreditLoyalty(row.uid,pts,`tank-month:${month}:${type}`,isStreak?"Monthly tank streak winner":"Monthly tank vote winner",settings.walletValidityMonths);
