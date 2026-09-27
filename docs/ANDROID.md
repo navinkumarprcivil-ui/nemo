@@ -615,12 +615,20 @@ deleted**, but as its own change.
 
 ### Pushing to main deploys the live site
 
-Established today, and contrary to the comment in `.github/workflows/deploy.yml` that says
-*"nothing deploys on its own from a push"*. Build `v90.cb94647d` was served by
-nemoaquastore.in while the newest run of that workflow was 47, carrying `v90.0845b31e`, and
-`quality.yml` has no deploy step. Something outside GitHub Actions — most likely Cloudflare's Git
-integration — builds and publishes `main` on every push. **The confirm box in the Actions tab is
-not the only gate.** Not yet confirmed in the Cloudflare dashboard.
+**Confirmed in the Cloudflare dashboard on 27 Sep 2026: the Worker has this repository
+connected under Settings → Build.** Cloudflare watches `main` itself and publishes every push.
+GitHub Actions is not involved.
+
+The symptom that led here: `v90.cb94647d` was serving on nemoaquastore.in while the newest run
+of `deploy.yml` was 47, carrying `v90.0845b31e`, and `quality.yml` has no deploy step. Pushing
+`d7676c3` then put `v90.8f32c55a` live with no workflow run at all.
+
+**The confirm box in the Actions tab is not a gate.** Neither are the checks inside that
+workflow — tests, the rules check, and `git diff --exit-code` on the generated files all guard
+the manual button and none of them see a plain push. A commit on `main` reaches customers as it
+is. Run `npm run check` before pushing; that is the only gate left.
+
+The comment in `deploy.yml` was corrected to say so.
 
 
 ## Still open

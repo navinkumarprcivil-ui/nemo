@@ -1,9 +1,19 @@
 name: Deploy website
 
-# Deliberately manual. The store owner runs this from the Actions tab when they
-# decide to go live — nothing deploys on its own from a push, because "the code
-# changed" and "I am ready for customers to see this" are different decisions,
-# and during a payment rollout that difference matters.
+# Manual, but NOT the only route to production. Cloudflare's Git integration is
+# connected to this repository and builds and publishes `main` on every push,
+# entirely outside GitHub Actions. Confirmed in the Cloudflare dashboard on
+# 27 Sep 2026, after pushing d7676c3 put v90.8f32c55a on nemoaquastore.in without
+# this workflow running at all.
+#
+# So read the gates below for what they are: they guard THIS button, not a push.
+# A commit that lands on `main` reaches customers whether or not its tests pass
+# and whether or not the generated files were rebuilt. Run `npm run check` before
+# pushing; that is the real gate now.
+#
+# This workflow is still worth keeping. It redeploys the current `main` on demand
+# — after a rolled-back Cloudflare build, or when a deploy needs to be forced
+# without an empty commit — and it fails loudly on the checks a push skips.
 on:
   workflow_dispatch:
     inputs:
