@@ -470,11 +470,10 @@ clear; the flag-clearing is the cheapest item below, not the reason for the rele
    `MainActivity` and `mapping.txt` showed 1.8.0's own `EdgeToEdgeApi23/26/29` making the
    deprecated calls Play flags. A five-minor jump that needed nothing else moved with it —
    `coreKtx` 1.10.1, `appcompat` 1.6.1 and `material` 1.14.0 all stayed where they were.
-   **This remains a hypothesis.** It is proven only when Play's report on 15 comes back without
-   both edge-to-edge actions. And **the bars below Android 15 are still unverified**: the
-   on-device check was Android 15, where `targetSdk` 36 forces edge-to-edge regardless, and a jump
-   this wide can move inset behaviour on older releases. The header under the status bar and the
-   bottom nav against the navigation bar want a look on an Android 13 or 14 device or emulator.
+   **Half proven since.** The bars were checked on an Android 14 emulator and are correct in both
+   navigation modes — see *The edge-to-edge bump is no longer a hypothesis* below, which also
+   records the navigation-bar overlap that check turned up. What is still unproven is Play's own
+   report on 15 coming back without both edge-to-edge actions.
 3. **A monochrome notification icon.** `res/drawable/ic_notification.xml`, a flat white fish
    silhouette, replacing `R.mipmap.ic_launcher` at `NemoMessagingService`. Android keeps only the
    alpha channel and tints the result, so the full-colour launcher icon was arriving as a
@@ -511,17 +510,90 @@ it would break the button in release builds only, which is the worst shape a bug
 messaging token call. Unrelated to anything in 15 and not touched.
 
 
+### The navigation bar overlap, and the ten fixes that came before this one
+
+Found on an Android 14 emulator in **3-button navigation**, which is the configuration nobody had
+ever tested: the system's back/home/recents buttons were drawn on top of the store's own bottom
+nav, with Home, Shop, Orders and Cart legible underneath them. Not a regression — the cause
+predates 14 — but 3-button users had been seeing some version of it all along.
+
+**Why it hid for so long.** The gesture pill is about 24dp tall and a 3-button bar about 48dp, so
+the same missing inset reads as slightly tight padding in gesture mode and as a collision with
+buttons. Every device used to check this app — the vivo I2301, the Pixel 9 AVD — runs gesture
+navigation by default, and Android 15 and 16 besides.
+
+**The cause.** `setOnApplyWindowInsetsListener` padded the root view by `systemBars.left/top/right`
+and passed **0** for the bottom, deliberately: the comment says *"Bottom remains zero because Nemo
+itself has its own bottom navigation menu."* That reasoning is wrong in one specific way. The web
+layout can only place itself above the navigation bar if it knows how tall the bar is, and it
+cannot: `env(safe-area-inset-bottom)` inside a WebView reports what the WebView was padded by, so
+zero padding means zero inset, correctly. `viewport-fit=cover` is present and the app's nav already
+asks for `calc(14px + env(safe-area-inset-bottom, 0px))` — the CSS was right all along and was
+being told the truth about a WebView that genuinely was not under anything.
+
+**What filled the gap.** `installNativeLayoutFix()` measured the inset natively, converted it to CSS
+pixels, and injected roughly a thousand lines of JavaScript that searched the DOM **by text
+content** — `textOf()`, `isVisible()` — to find the nav and lift it with `bottom: !important`.
+Two things make that unable to work here. It runs only when insets change, while the store is a
+React SPA whose re-renders discard the inline styles it sets; and it identifies elements by the
+words inside them, so a renamed tab silently ends the fix.
+
+Its own `cleanupLegacyFixes()` is the clearest evidence: it deletes the debris of
+`nemo-native-layout-v6-style` through `v15-style`, plus `nemo-android-bottom-fix`,
+`nemo-v11-product-cart-style`, `nemo-android-bottom-spacer`, `nemo-native-page-safe-space` and
+several `data-nemo-*-lifted` attribute families. **Ten generations of this fix, each cleaning up
+after the last.** A v15 entry in that list, inside a v15 build, is the whole story.
+
+**The fix.** `systemBars.bottom` instead of `0`, and the hack turned off:
+
+```kotlin
+private val nativeLayoutFixEnabled = false      // new, immediately above the function
+
+private fun installNativeLayoutFix(view: WebView?) {
+    if (!nativeLayoutFixEnabled) return
+    ...
+}
+```
+
+The WebView no longer extends under the navigation bar, so the overlap is structurally impossible
+on every Android version and in both navigation modes, and nothing has to stay in sync. Verified on
+the Pixel 7 API 34 AVD in 3-button mode: nav clear of the system buttons, header unchanged, the
+last row of a product list reachable, and the offline pill still above the nav.
+
+A `private val` rather than a `const` is deliberate — Kotlin then does not flag the body as
+unreachable, so it compiles without a warning, and flipping it back to `true` restores the previous
+behaviour exactly. **The dead body should be deleted**, but as its own change, not mixed into this
+one.
+
+**The one cosmetic consequence.** The strip behind the system buttons now shows the window
+background rather than the page, so it is pure white against the nav's faint blue wash. Left as it
+is: matching a solid colour to a translucent gradient tends to look worse than an honest edge. The
+root view's background is the knob if that judgement ever changes.
+
+### The edge-to-edge bump is no longer a hypothesis, below Android 15
+
+`activityKtx` 1.8.0 to 1.13.0 was recorded above as unproven, with the bars below 15 untested,
+because the only device to hand ran Android 15 — where `targetSdk` 36 forces edge-to-edge whatever
+the library does, so that check could not have caught a regression. A Pixel 7 API 34 AVD closes it:
+header clear of the status bar, nav clear of the navigation bar, list ends reachable, in both
+gesture and 3-button navigation. **Still open is Play's own report** on 15 coming back without both
+edge-to-edge actions, which is the half no emulator can answer.
+
+
 ## Still open
 
-- `android:usesCleartextTraffic="true"` is in the manifest and is not needed — the app only ever
-  loads `https://www.nemoaquastore.in`. Left alone during the qualifying run because a
-  third-party subresource loading over http would fail silently, and only in release.
 - `FirebaseMessaging.getInstance().token` compiles with a deprecation warning. It works and is
   the documented way to fetch a registration token; revisit when the BOM next moves.
-- The notification's small icon is `ic_launcher`, which Android flattens to a white silhouette.
-  A dedicated monochrome drawable would look better.
 - The admin `loadOrders()` reads the whole `orders` node. Fine now; paginate before ~5,000
   orders.
+- `installNativeLayoutFix()` is switched off but its body is still in the file — around a
+  thousand lines of injected JavaScript that nothing calls into any more. Delete it, on its own,
+  once a release has shipped with `nativeLayoutFixEnabled = false` and nobody has missed it.
+- Nothing below API 34 has been looked at. `minSdk` is 24, the inset fix is structural rather than
+  version-dependent, and 33 shares an `EdgeToEdge` implementation with 34 — but that is reasoning,
+  not a test.
+
+Cleared in 15: the cleartext-traffic attribute, and the notification's small icon.
 
 ## If the app is ever migrated to a TWA
 
