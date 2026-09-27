@@ -499,7 +499,11 @@ for `sharePdf`, and came out when that proved impossible. An app that takes paym
 ship a component with nothing to serve. Both are two commands away if a platform API ever makes
 sharing a file possible.
 
-**Measured on the release bundle.** `app-release.aab` 3,653,297 bytes, against 14's 3.6 MB.
+**Measured on the release bundle.** `app-release.aab` 3,647,638 bytes, against 14's 3.6 MB. (The
+first 15 bundle was 3,653,297; the navigation-bar fix below took 5,659 bytes off it. The drop is
+small because R8 keeps the disabled function's injected-JavaScript string literal — a `val` guard
+is not a compile-time constant, so the body is not provably dead. Deleting it should reclaim the
+rest.)
 Uncompressed DEX 2,464,244 bytes, against Play's 10 MB threshold. `mapping.txt` carries
 `in.nemoaquastore.app.MainActivity$AndroidShareBridge -> in.nemoaquastore.app.MainActivity$AndroidShareBridge:`
 and `void printDocument(java.lang.String,java.lang.String) -> printDocument`, both unrenamed. That
