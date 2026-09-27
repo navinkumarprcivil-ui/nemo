@@ -1333,6 +1333,27 @@ async function clearAllCaches(){
     }
   }catch(e){}
 
+  /* 2b. The same media, in IndexedDB — which is where it actually lives.
+
+     mediaSet moved every cached image into the nemo-media store once IndexedDB was available,
+     and writes localStorage only as the no-IDB fallback. Step 2 above was never updated to
+     follow, so on any ordinary browser this function cleared the app shell and a handful of
+     small keys, reported "0 images", and left every cached photo exactly where it was. The one
+     thing the button exists for — a replaced product photo still showing — was the one thing it
+     could not do.
+
+     Keys are matched by the same media prefixes rather than wiping the store, so anything else
+     that is ever put there is left alone. The count goes into report.media; the bytes do not,
+     because sizing these would mean reading every value back, and the values are whole images.
+     An understated MB figure is a fair price for not pulling the entire cache into memory. */
+  try{
+    if(HAS_IDB){
+      const keys=await IDB.keys();
+      const doomed=(keys||[]).filter(k=>typeof k==="string"&&MEDIA_PREFIX.some(pre=>k.indexOf(pre)===0));
+      for(const k of doomed){ try{ await IDB.del(k); report.media++; }catch(e){} }
+    }
+  }catch(e){}
+
   // 3. Make the service worker fetch a fresh copy of everything on next load.
   //    update() rather than unregister(): unregistering drops the offline
   //    fallback until a new worker installs, and this can be pressed offline.
@@ -8415,7 +8436,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.ed293682";
+const APP_BUILD = "v90.aa162de2";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
