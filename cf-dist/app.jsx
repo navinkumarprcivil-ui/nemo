@@ -2015,6 +2015,16 @@ async function repairPosterPointer(id){
    Returns null if Storage isn't available/enabled or the upload fails — callers then fall
    back to storing the base64 in the Realtime Database (the original behaviour). */
 const FB_UPLOAD_MS = 45000;   // generous — a photo on slow mobile data still needs a while
+/* …but the generous window is only earned once Storage has actually worked. firebase.storage()
+   constructs an object whether or not the project has a usable bucket, so on the free (Spark)
+   plan FB_STORAGE is truthy and every putString fails — and the Storage SDK retries internally
+   for up to TEN MINUTES, so the promise neither resolves nor rejects inside the window below.
+   Every upload therefore burned the full 45 seconds, three times over per photo: persistImage
+   tried Storage, then saveMediaItem tried the same bytes again, then again for the thumbnail.
+   That is why adding a product with one picture took three to four minutes. The first attempt
+   of a session gets this much instead, and one timeout is enough to settle the question. */
+const FB_UPLOAD_PROBE_MS = 8000;
+let FB_STORAGE_PROVEN = false;
 const UPLOAD_TIMED_OUT = {};  // sentinel, distinct from any value putString can resolve to
 async function uploadToStorage(path, dataUrl){
   if(!FB_STORAGE || typeof dataUrl!=="string" || !dataUrl.startsWith("data:")) return null;
@@ -2024,10 +2034,20 @@ async function uploadToStorage(path, dataUrl){
     await ref.putString(dataUrl, "data_url");
     return await ref.getDownloadURL();
   })().catch(e=>{ failed=e||new Error("upload failed"); return null; });
-  // Bounded so a stalled upload can't spin the save forever. A timeout is NOT treated as
-  // "Storage is off" — the connection was just slow, so Storage stays enabled for next time.
-  const url=await Promise.race([task, new Promise(r=>setTimeout(()=>r(UPLOAD_TIMED_OUT), FB_UPLOAD_MS))]);
-  if(url===UPLOAD_TIMED_OUT){ console.warn("Storage upload timed out — using base64 path:", path); return null; }
+  // Bounded so a stalled upload can't spin the save forever, and bounded tightly until an
+  // upload has actually succeeded — see FB_UPLOAD_PROBE_MS.
+  const budget=FB_STORAGE_PROVEN?FB_UPLOAD_MS:FB_UPLOAD_PROBE_MS;
+  const url=await Promise.race([task, new Promise(r=>setTimeout(()=>r(UPLOAD_TIMED_OUT), budget))]);
+  if(url===UPLOAD_TIMED_OUT){
+    // A timeout now stands Storage down for the rest of the session, exactly as a rejection does.
+    // It used to leave it enabled, on the theory that the connection was merely slow. Whichever
+    // it is — no bucket, or a link too slow to finish — the base64 path is the one that
+    // completes, and paying this wait again on the next photo is strictly worse than taking the
+    // fallback now. Resets on reload, so enabling Storage later costs nothing but reopening.
+    FB_STORAGE=null;
+    console.warn("Storage upload timed out — using the base64 path for the rest of this session:", path);
+    return null;
+  }
   if(failed){
     // On the free (Spark) plan Storage isn't enabled, so every upload 401s. After the first
     // failure, disable Storage for this session so we go straight to the base64 path (no waiting
@@ -2036,13 +2056,16 @@ async function uploadToStorage(path, dataUrl){
     console.warn("Storage unavailable — using free-plan base64 path:", failed.message);
     return null;
   }
+  FB_STORAGE_PROVEN=true;   // the generous timeout is earned from here on
   return url;
 }
-async function saveMediaItem(key,b64){
+/* `tryStorage` is false when the caller has ALREADY attempted Storage for these exact bytes —
+   persistImage does, and re-attempting here meant one failing upload was paid for twice. */
+async function saveMediaItem(key,b64,tryStorage=true){
   await mediaSet("nemo-m-"+key,b64);
   if(FB_OK){
     // Prefer Storage: keep only a tiny URL in the DB (huge speed win on load/sync).
-    const url=await uploadToStorage("media/"+key+".jpg", b64);
+    const url=tryStorage?await uploadToStorage("media/"+key+".jpg", b64):null;
     if(url){ await fbWrite(FB_DB.ref("media/"+key), url); await mediaSet("nemo-m-"+key,url); return true; }
     // Fallback: store base64 in the DB (original behaviour) so nothing breaks if Storage is off.
     // Base64 rows are big, so give this one a longer leash than an ordinary write.
@@ -2213,10 +2236,10 @@ async function persistImage(key, b64, withThumb=true){
   }
   // FREE plan (Storage off) — base64 in the Realtime Database, plus a small base64 thumbnail
   // so the catalog grid stays light (full image only loads on the product page).
-  await saveMediaItem(key, b64);
+  await saveMediaItem(key, b64, false);
   if(withThumb){
     const t=await makeThumb(b64);
-    if(t){ await saveMediaItem(key+"_thumb", t); out.thumbData=t; }
+    if(t){ await saveMediaItem(key+"_thumb", t, false); out.thumbData=t; }
   }
   return out;
 }
@@ -8236,7 +8259,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.d1e6f51c";
+const APP_BUILD = "v90.1fb30ee5";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
