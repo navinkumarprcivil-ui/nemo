@@ -9,34 +9,32 @@ it; when it is settled *wrongly*, the "if it is wrong" line says where the cause
 
 ---
 
-## Now — the production rollout of version 16
+## Now — version 16 is at 100% in production
 
-Submitted for review on 27 September 2026 as a **20% staged rollout**, promoted straight from
-internal testing. Production had been on 14 (2.0.3) since before the navigation-bar fix existed, so
-every device on it still has the bar sitting over the system buttons.
+Promoted straight from internal testing on 27 September 2026, submitted as a 20% staged rollout,
+cleared review the same day and **taken to 100% the same day**. Production had been on 14 (2.0.3)
+since before the navigation-bar fix existed, so every device on it still had the bar over the system
+buttons — which is the case for going fast, and is why the percentage went up quickly.
 
-**Review cleared and the rollout went live the same day, 27 September 2026.** Production is on
-16 (2.1.1) for 20% of users; 14 (2.0.3) for the rest. What remains is the watch below and then
-raising the percentage.
+**What 100% changes.** The staged rollout was the safety margin, and it is spent. Halting now is
+close to meaningless: it stops devices that have not yet fetched the update, but Play has already
+offered 16 to everyone and takes nothing back from a device that installed it. **A problem found from
+here is fixed by shipping version code 17**, built and uploaded fresh — a bundle that has been rolled
+out can never be re-uploaded under the same version code.
 
-**Check on days 1 and 2:** Play Console → **Quality → Android vitals → Crashes and ANRs**, filtered
-to version code 16. The number that matters is **crash-free sessions**; compare it against 14 over
-the same window rather than against 100%, because the baseline is not perfect either. Also glance at
-**Ratings and reviews** — a layout regression shows up there before it shows up in vitals, since a
-misplaced bar is not a crash.
+**Still worth watching, days 1 to 3:** Play Console → **Quality → Android vitals → Crashes and
+ANRs**, filtered to version code 16, and **Ratings and reviews**. A layout regression arrives in the
+reviews, not in vitals, because a misplaced bar is not a crash.
 
-**Then:** if both look like 14 did, raise the rollout — 50%, then 100%. There is no need to rush it
-and no prize for finishing in a day.
-
-**If it is wrong:** halt the rollout from the release's ⋮ menu. Halting stops new devices from
-getting it; **it does not take it back from devices that already updated**, so the 20% is the actual
-safety margin and the halt button is only damage control. A fix then ships as version code 17 — a
-bundle that has been rolled out can never be re-uploaded under the same version code.
+**Read the first day's numbers loosely.** At 100% Play still distributes over several days — devices
+update when they update — so day one is a thin sample and a single crash can look like a terrible
+rate. Compare 16 against what 14 was doing over an equivalent window, not against a round number.
 
 **Where the risk actually is:** `minSdk` is 24 and the inset handling has only ever run on API 33 to
 36. `tappableElement()` is API 29+ and below that `WindowInsetsCompat` should fall back to
-`systemBars()`. If 16 misbehaves anywhere, an old Android version is the first place to look — see
-*API 24 to 28* below.
+`systemBars()`. If 16 misbehaves anywhere, an old Android version is the first place to look, and a
+review naming an old phone is the signal to start building 17 rather than to wait — see *API 24 to
+28* below.
 
 ---
 
