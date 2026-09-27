@@ -638,8 +638,9 @@ not the only gate.** Not yet confirmed in the Cloudflare dashboard.
   version-dependent — but that is reasoning, not a test.
 - Why the vivo's WebView ignored `--nemo-nav-inset` is still unknown. It does not matter while the
   padding is native, but it would matter again if anyone moves the offset back into CSS.
-- `setWebContentsDebuggingEnabled(true)` is now called under `BuildConfig.DEBUG`, so `chrome://inspect`
-  reaches the WebView in debug builds and never in release.
+- `chrome://inspect` reaches the WebView in a debug build with no code at all: WebView enables
+  content debugging automatically for a debuggable application. Worth remembering before adding
+  `setWebContentsDebuggingEnabled` — it is not needed, and in a release build it should not be there.
 
 Cleared in 15: the cleartext-traffic attribute, and the notification's small icon.
 
