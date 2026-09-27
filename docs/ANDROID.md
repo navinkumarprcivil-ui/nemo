@@ -609,9 +609,35 @@ unknown.
 That is why the native route won. It is blunter, it gives up drawing behind the bar, and it depends
 on nothing the web layer has to honour.
 
-A `private val` rather than a `const` for `nativeLayoutFixEnabled` is deliberate — Kotlin then does
-not flag the body as unreachable, so it compiles without a warning. **The dead body should be
-deleted**, but as its own change.
+A `private val` rather than a `const` for `nativeLayoutFixEnabled` was deliberate — Kotlin then did
+not flag the body as unreachable, so it compiled without a warning while the fix was proven.
+
+### The dead body was deleted — 27 Sep 2026
+
+`MainActivity.kt` went from **3,223 to 2,293 lines**: 930 removed, 29% of the file. What came out:
+
+- `installNativeLayoutFix()` itself, 872 lines, and the `NEMO ANDROID LAYOUT BRIDGE (V16)` comment
+  above it describing behaviour that had not run since the flag went to `false`
+- `private val nativeLayoutFixEnabled`
+- all four call sites — the inset listener, `onCreate`, `onPageFinished`, and `onResume` — along
+  with the two `if (::webView.isInitialized)` blocks that would otherwise have been left empty
+- `private var systemBottomInsetCssPx`, its assignment in the inset listener, and the now-unused
+  `import kotlin.math.roundToInt`
+
+That last group is the part worth remembering. The field was *written* on every inset change and
+read only by the deleted body, so it survived both the compiler and a first pass that counted
+textual occurrences — an assignment looks exactly like a use. Finding it took reading what each
+remaining declaration was actually *for*.
+
+**`fun bottomInset(): Int = 0` was kept**, though nothing calls it. It is a
+`@JavascriptInterface`, so its caller is the web page, and the page in the WebView can be a cached
+older bundle — an earlier `app.jsx` did call it. A stale bundle calling a method that no longer
+exists throws a `TypeError`. The window is short, because the store reloads when it sees a new
+build, but the thing being removed is one line returning a constant. Keep it.
+
+**Verified** on the vivo I2301 (API 35) in both gesture and 3-button navigation after the
+deletion, with no new compiler warnings — the pre-existing `FirebaseMessaging` deprecation moved
+from line 1010 to 999, exactly the 11 lines removed above it.
 
 ### Pushing to main deploys the live site
 
@@ -637,9 +663,6 @@ The comment in `deploy.yml` was corrected to say so.
   the documented way to fetch a registration token; revisit when the BOM next moves.
 - The admin `loadOrders()` reads the whole `orders` node. Fine now; paginate before ~5,000
   orders.
-- `installNativeLayoutFix()` is switched off but its body is still in the file — around a
-  thousand lines of injected JavaScript that nothing calls into any more. Delete it, on its own,
-  once a release has shipped with `nativeLayoutFixEnabled = false` and nobody has missed it.
 - The status bar strip at the top shows the window background against the page's white. Same
   underlying cause as the navigation bar had, on the other edge, and not yet fixed.
 - Nothing below API 33 has been looked at. `minSdk` is 24 and the fix is structural rather than
