@@ -63,3 +63,25 @@ test('every bottom-anchored rule reads --safe-b, not the raw environment variabl
   // The definition must not be self-referential.
   assert.doesNotMatch(app, /--safe-b:max\(var\(--safe-b\)/);
 });
+
+/* The value behind --nemo-nav-inset is pulled, not pushed. Android used to inject it with
+   evaluateJavascript when the insets changed, which loses the property on every reload: the new
+   document has an empty documentElement.style and the insets have not changed, so nothing sets
+   it again. These assertions pin the shape that survives a reload — the page asks the bridge,
+   and asks again on the events that can change the answer. */
+test('the navigation bar inset is read from the bridge, on every event that can change it', () => {
+  assert.match(app, /function syncAndroidNavInset\(\)\{/);
+  // Asked for, never waited for.
+  assert.match(app, /typeof b\.bottomInset!=="function"\) return;/);
+  assert.match(app, /setProperty\("--nemo-nav-inset",px\+"px"\)/);
+  /* A reading taken before the insets are delivered is 0, and a bar is tens of pixels; clamping
+     keeps a bad number from becoming layout. */
+  assert.match(app, /px<0\|\|px>200\) return;/);
+  for (const ev of ['resize', 'orientationchange']) {
+    assert.match(app, new RegExp(`addEventListener\\("${ev}",syncAndroidNavInset\\)`),
+      `${ev} must re-ask: rotating and switching to gesture navigation both change the bar`);
+  }
+  assert.match(app, /if\(!document\.hidden\) syncAndroidNavInset\(\);/);
+  // Runs at module scope, so a reload re-establishes the property without any native help.
+  assert.match(app, /^\s*syncAndroidNavInset\(\);$/m);
+});

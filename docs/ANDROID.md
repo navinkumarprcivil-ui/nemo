@@ -548,7 +548,8 @@ Its own `cleanupLegacyFixes()` is the clearest evidence: it deletes the debris o
 several `data-nemo-*-lifted` attribute families. **Ten generations of this fix, each cleaning up
 after the last.** A v15 entry in that list, inside a v15 build, is the whole story.
 
-**The fix.** `systemBars.bottom` instead of `0`, and the hack turned off:
+**The first fix, and why it did not ship.** `systemBars.bottom` instead of `0`, and the hack
+turned off:
 
 ```kotlin
 private val nativeLayoutFixEnabled = false      // new, immediately above the function
@@ -559,20 +560,66 @@ private fun installNativeLayoutFix(view: WebView?) {
 }
 ```
 
-The WebView no longer extends under the navigation bar, so the overlap is structurally impossible
-on every Android version and in both navigation modes, and nothing has to stay in sync. Verified on
-the Pixel 7 API 34 AVD in 3-button mode: nav clear of the system buttons, header unchanged, the
-last row of a product list reachable, and the offline pill still above the nav.
+That ended the overlap — verified on the Pixel 7 API 34 AVD in 3-button mode, and on API 33 — and
+it cost too much to keep. Padding the root view stops the WebView extending under the bar, so the
+strip behind the system buttons shows the **window background** instead of the page. On the Pixel
+that is a thin white line. On the vivo I2301 it is a tall slab of empty white under the nav, wide
+enough that the app looks broken. A fix that trades a collision for a slab is not a fix.
 
-A `private val` rather than a `const` is deliberate — Kotlin then does not flag the body as
-unreachable, so it compiles without a warning, and flipping it back to `true` restores the previous
-behaviour exactly. **The dead body should be deleted**, but as its own change, not mixed into this
-one.
+**The fix that shipped.** The padding goes back to `0`, the WebView stays edge-to-edge, and the
+page is simply **told how tall the bar is**. One CSS custom property carries it:
 
-**The one cosmetic consequence.** The strip behind the system buttons now shows the window
-background rather than the page, so it is pure white against the nav's faint blue wash. Left as it
-is: matching a solid colour to a translucent gradient tends to look worse than an honest edge. The
-root view's background is the knob if that judgement ever changes.
+```css
+:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
+```
+
+Every one of the 18 bottom-anchored rules in `app.jsx` now reads `var(--safe-b)`; exactly one raw
+`env()` call survives, inside that definition, and a test asserts that. `max()` is what makes it
+safe everywhere: in a browser, or in an app build that never sets the property, `--nemo-nav-inset`
+is missing, the fallback is `0px`, and the environment variable wins — which is the correct answer
+on every platform that is not an edge-to-edge WebView.
+
+**Pull, not push.** The first attempt at setting it had Kotlin inject the value from the inset
+listener:
+
+```kotlin
+view?.evaluateJavascript(
+    "document.documentElement.style.setProperty('--nemo-nav-inset','${navInset}px')", null)
+```
+
+The overlap came straight back. An injected inline style lives on `documentElement`, and a reload
+builds a new `documentElement` — while the insets have **not** changed, so the listener never fires
+again and nothing re-sets it. The store reloads itself on purpose whenever it sees a new build
+(`checkForUpdate` → `forceRefresh`), so the property was being wiped by design. The same race
+exists on a cold start: insets are often delivered before the bundle has run.
+
+So the page asks instead. `bottomInset()` on the existing `AndroidShareBridge`, read at module
+scope in `app.jsx` and again on `load`, `resize`, `orientationchange` and `visibilitychange` — the
+events that can change the answer. A reload asks; rotating asks; switching between gesture and
+3-button navigation fires `resize` and asks. Nothing has to be kept in sync, because nothing is
+stored. R8 keeps `@JavascriptInterface` methods by annotation, so the new method needed no keep
+rule.
+
+Kotlin measures on demand rather than reading a cached field, which closes the cold-start race:
+
+```kotlin
+@JavascriptInterface
+fun bottomInset(): Int {
+    val v = webViewOrNull() ?: return systemBottomInsetCssPx
+    val insets = ViewCompat.getRootWindowInsets(v) ?: return systemBottomInsetCssPx
+    return (insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom /
+        resources.displayMetrics.density).roundToInt().coerceAtLeast(0)
+}
+```
+
+**What this leaves.** The page sits behind the navigation bar, as an edge-to-edge app should, and
+its own content clears it. No window background is exposed, so there is no slab and no white line.
+The status bar at the top is a separate matter and is **not** addressed here: it still shows the
+window background against the page's white.
+
+A `private val` rather than a `const` for `nativeLayoutFixEnabled` is deliberate — Kotlin then does
+not flag the body as unreachable, so it compiles without a warning. **The dead body should be
+deleted**, but as its own change, not mixed into this one.
 
 ### The edge-to-edge bump is no longer a hypothesis, below Android 15
 
@@ -593,7 +640,9 @@ edge-to-edge actions, which is the half no emulator can answer.
 - `installNativeLayoutFix()` is switched off but its body is still in the file — around a
   thousand lines of injected JavaScript that nothing calls into any more. Delete it, on its own,
   once a release has shipped with `nativeLayoutFixEnabled = false` and nobody has missed it.
-- Nothing below API 34 has been looked at. `minSdk` is 24, the inset fix is structural rather than
+- The status bar strip at the top shows the window background against the page's white. Same
+  underlying cause as the navigation bar had, on the other edge, and not yet fixed.
+- Nothing below API 33 has been looked at. `minSdk` is 24, the inset fix is structural rather than
   version-dependent, and 33 shares an `EdgeToEdge` implementation with 34 — but that is reasoning,
   not a test.
 
