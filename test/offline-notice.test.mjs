@@ -38,14 +38,28 @@ test('the pill is anchored to the bottom and clears the nav, the cart bar and th
   const css = app.slice(app.indexOf('.offline-pill{'));
   const rule = css.slice(0, css.indexOf('}') + 1);
   assert.match(rule, /position:fixed/);
-  assert.match(rule, /bottom:calc\(env\(safe-area-inset-bottom, 0px\) \+ 78px\)/);
+  assert.match(rule, /bottom:calc\(var\(--safe-b\) \+ 78px\)/);
   assert.doesNotMatch(rule, /top:/);
   /* Without this the pill eats taps on whatever it floats over — a worse bug than the one it
      was introduced to fix, and an invisible one. */
   assert.match(rule, /pointer-events:none/);
   // Steps over the Add-to-cart bar rather than landing on it.
-  assert.match(app, /body:has\(\.floating-cart-bar\) \.offline-pill\{bottom:calc\(env\(safe-area-inset-bottom, 0px\) \+ 134px\);?\}/);
+  assert.match(app, /body:has\(\.floating-cart-bar\) \.offline-pill\{bottom:calc\(var\(--safe-b\) \+ 134px\);?\}/);
   /* Both widths that hide .mobile-bottom-nav must bring the pill back down; a pill hovering
      78px up a desktop window with no nav under it reads as a rendering fault. */
-  assert.match(app, /@media\(min-width:1000px\)\{\.offline-pill\{bottom:calc\(env\(safe-area-inset-bottom, 0px\) \+ 18px\);?\}\}/);
+  assert.match(app, /@media\(min-width:1000px\)\{\.offline-pill\{bottom:calc\(var\(--safe-b\) \+ 18px\);?\}\}/);
+});
+
+/* The Android app is edge-to-edge by design, so the WebView is not padded and the CSS
+   environment variable for the bottom inset is correctly zero there. Everything anchored to the
+   bottom therefore has to read --safe-b, which folds in the value MainActivity injects. A raw
+   env() call anywhere else is the bug: it works in a browser and silently sits under the
+   navigation buttons in the installed app. */
+test('every bottom-anchored rule reads --safe-b, not the raw environment variable', () => {
+  assert.match(app, /:root\{--safe-b:max\(env\(safe-area-inset-bottom, 0px\), var\(--nemo-nav-inset, 0px\)\);\}/);
+  // Exactly one raw call survives, inside that definition.
+  const raw = app.match(/env\(safe-area-inset-bottom[^)]*\)/g) || [];
+  assert.equal(raw.length, 1, 'raw bottom env() calls outside the :root definition: ' + (raw.length - 1));
+  // The definition must not be self-referential.
+  assert.doesNotMatch(app, /--safe-b:max\(var\(--safe-b\)/);
 });

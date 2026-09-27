@@ -5227,6 +5227,20 @@ function generateInvoiceHTML(order, settings, opts){
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invoice ${invNo}</title>
 <style>
 *{box-sizing:border-box}
+/* The bottom safe area, from whichever source actually knows it.
+
+   In a browser it is the CSS environment variable: the page is laid out under the system bars and
+   the engine reports how far. Inside the Android app it is neither — MainActivity leaves the
+   WebView edge-to-edge on purpose so the store's own background runs behind the navigation bar,
+   and a WebView reports that variable as the padding it was given, which is correctly zero. The
+   page then has no way to learn the bar's height, and every bottom-anchored thing sits under the
+   buttons.
+
+   So the app hands the number in: one setProperty on documentElement per inset change, read here.
+   max() rather than a swap because only one of the two is ever non-zero, and a custom property
+   survives React re-renders in a way inline styles set from outside do not — which is what sank
+   the ten generations of injected layout fixes described in docs/ANDROID.md. */
+:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;background:#e9edf3;margin:0;padding:20px;color:#1f2733}
 .page{max-width:780px;margin:0 auto;background:#fff;padding:42px 44px 36px;box-shadow:0 8px 32px rgba(31,56,100,.14)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
@@ -6000,7 +6014,7 @@ img.smooth-img[data-loaded="1"]{opacity:1;}
    centring transform and pushes half of a fixed bar off-screen. Give this bar its
    own entrance animation so it remains centred after the animation completes. */
 @keyframes floatingCartIn{from{transform:translate(-50%,16px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
-.floating-cart-bar{position:fixed !important;left:50% !important;bottom:calc(76px + env(safe-area-inset-bottom)) !important;transform:translateX(-50%) !important;animation:floatingCartIn .25s cubic-bezier(.22,1,.36,1) both;}
+.floating-cart-bar{position:fixed !important;left:50% !important;bottom:calc(76px + var(--safe-b)) !important;transform:translateX(-50%) !important;animation:floatingCartIn .25s cubic-bezier(.22,1,.36,1) both;}
 /* The offline notice, in the one part of the screen where nothing important lives.
 
    It spent three revisions pinned to the top, getting smaller each time, and that could never
@@ -6012,7 +6026,7 @@ img.smooth-img[data-loaded="1"]{opacity:1;}
    photos are missing — so it belongs where a status toast goes, not where a warning goes.
    It shares the bottom stack with the cart bar, so it takes the same 76px step over the nav,
    and pointer-events:none keeps it from ever swallowing a tap meant for the page. */
-.offline-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 78px);
+.offline-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-b) + 78px);
   z-index:9300;max-width:calc(100% - 28px);background:#0f172a;color:#fff;
   font-family:'Plus Jakarta Sans',sans-serif;font-size:11.5px;font-weight:700;line-height:1.3;
   padding:7px 15px;border-radius:999px;box-shadow:0 6px 18px rgba(15,23,42,.34);
@@ -6020,11 +6034,11 @@ img.smooth-img[data-loaded="1"]{opacity:1;}
 /* Step over the Add-to-cart bar when one is on screen so the two never stack on each other.
    A browser too old for :has() simply keeps the lower slot, which is the same overlap the cart
    bar already tolerated — it degrades to untidy, never to unusable. */
-body:has(.floating-cart-bar) .offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 134px);}
+body:has(.floating-cart-bar) .offline-pill{bottom:calc(var(--safe-b) + 134px);}
 /* Both widths that hide .mobile-bottom-nav: with no nav to clear, sit near the edge. */
-@media(min-width:1000px){.offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);}}
+@media(min-width:1000px){.offline-pill{bottom:calc(var(--safe-b) + 18px);}}
 @media(min-width:820px) and (max-width:999px) and (orientation:landscape){
-  .offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);}}
+  .offline-pill{bottom:calc(var(--safe-b) + 18px);}}
 @media(min-width:1000px){
   /* Surround matches the app background exactly, so the centred column blends into the page
      (no visible frame / dark band, regardless of window width) */
@@ -6099,7 +6113,7 @@ body:has(.floating-cart-bar) .offline-pill{bottom:calc(env(safe-area-inset-botto
   .home-hero{padding-top:16px !important;padding-bottom:16px !important;}
   .home-hero .hero-tagline{font-size:clamp(22px,3.4vw,34px) !important;margin-bottom:8px !important;}
   .sheet-panel{max-height:96vh !important;}
-  .mobile-bottom-nav{padding-top:4px !important;padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 4px) !important;}
+  .mobile-bottom-nav{padding-top:4px !important;padding-bottom:calc(var(--safe-b) + 4px) !important;}
 }
 /* Landscape notches/rounded corners live on the left and right edges. */
 @media(orientation:landscape){
@@ -8388,7 +8402,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.8585c120";
+const APP_BUILD = "v90.0845b31e";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -10444,7 +10458,7 @@ function MediaLightbox({slides=[],index=0,setIndex,onClose,name=""}){
           <button className="press" onClick={()=>go(1)} aria-label="Next" style={{...iconBtn,position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",width:46,height:46,borderRadius:"50%",fontSize:24,zIndex:3}}>›</button>
         </>)}
         {slides.length>1&&(
-          <div style={{position:"absolute",bottom:"calc(env(safe-area-inset-bottom,0px) + 26px)",left:0,right:0,display:"flex",justifyContent:"center",gap:6,zIndex:3}}>
+          <div style={{position:"absolute",bottom:"calc(var(--safe-b) + 26px)",left:0,right:0,display:"flex",justifyContent:"center",gap:6,zIndex:3}}>
             {slides.map((s,i)=>(
               <button key={i} className="press" onClick={()=>setIndex(i)} aria-label={"Go to slide "+(i+1)}
                 style={{width:i===index?22:8,height:8,borderRadius:20,border:"none",padding:0,cursor:"pointer",background:i===index?"#fff":"rgba(255,255,255,.45)",transition:"width .2s"}}/>
@@ -10452,7 +10466,7 @@ function MediaLightbox({slides=[],index=0,setIndex,onClose,name=""}){
           </div>
         )}
         {!isVideo&&(
-          <div style={{position:"absolute",left:12,bottom:"calc(env(safe-area-inset-bottom,0px) + 22px)",display:"flex",flexDirection:"column",gap:8,zIndex:3}}>
+          <div style={{position:"absolute",left:12,bottom:"calc(var(--safe-b) + 22px)",display:"flex",flexDirection:"column",gap:8,zIndex:3}}>
             <button className="press" onClick={()=>zoomBy(1.5)} disabled={scale>=4} aria-label="Zoom in" style={{...iconBtn,width:42,height:42,borderRadius:12,fontSize:22,opacity:scale>=4?0.4:1}}>+</button>
             <button className="press" onClick={()=>zoomBy(1/1.5)} disabled={scale<=1.02} aria-label="Zoom out" style={{...iconBtn,width:42,height:42,borderRadius:12,fontSize:24,opacity:scale<=1.02?0.4:1}}>−</button>
           </div>
@@ -11107,7 +11121,7 @@ function DocViewer({doc,onClose,showToast}){
   const btn={background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:99,padding:"8px 14px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",color:C.text,cursor:"pointer",flexShrink:0};
   return(
     <Portal>
-      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,height:"100dvh",background:"#ffffff",zIndex:5200,display:"flex",flexDirection:"column",paddingBottom:"env(safe-area-inset-bottom, 0px)"}}>
+      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,height:"100dvh",background:"#ffffff",zIndex:5200,display:"flex",flexDirection:"column",paddingBottom:"var(--safe-b)"}}>
         <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexShrink:0}}>
           <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:16,fontWeight:800,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
@@ -11176,7 +11190,7 @@ function MiniCart({open,onClose,cart,total,updateQty,nav,settings={},products=[]
           })}
         </div>
         {cart.length>0&&(
-          <div style={{padding:"14px 18px calc(16px + env(safe-area-inset-bottom))",borderTop:`1px solid ${C.border}`,background:"#fff"}}>
+          <div style={{padding:"14px 18px calc(16px + var(--safe-b))",borderTop:`1px solid ${C.border}`,background:"#fff"}}>
             {thr>0&&left>0&&<div style={{fontSize:11,color:C.textSub,marginBottom:10,textAlign:"center"}}>Add <b style={{color:C.coral}}>₹{left}</b> more for free delivery 🚚</div>}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <span style={{fontSize:14,fontWeight:700,color:C.text}}>Subtotal</span>
@@ -11583,7 +11597,7 @@ function ExitIntentModal({savings=0, onStay, onLeave}){
   const REASONS=["Found a better deal elsewhere","Facing technical issue on the website","Change my mind","Price issue","Others"];
   const toggle=r=>setReasons(p=>p.includes(r)?p.filter(x=>x!==r):[...p,r]);
   const overlay={position:"fixed",inset:0,background:"rgba(17,24,39,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:4000};
-  const sheet={width:"100%",maxWidth:440,background:"#fff",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(22px + env(safe-area-inset-bottom))",boxShadow:"0 -12px 40px rgba(0,0,0,.25)"};
+  const sheet={width:"100%",maxWidth:440,background:"#fff",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(22px + var(--safe-b))",boxShadow:"0 -12px 40px rgba(0,0,0,.25)"};
   const savingsBar=(emoji)=>savings>0?(
     <div style={{background:"linear-gradient(90deg,#dcfce7,#bbf7d0)",borderRadius:12,padding:"10px 14px",marginBottom:18,fontSize:13,fontWeight:700,color:"#15803d",textAlign:"center"}}>{emoji} You might miss out on savings of <span style={{fontFamily:PRICE_FONT}}>₹{Math.round(savings)}</span></div>
   ):null;
@@ -12813,7 +12827,7 @@ function WhyNemoPopup({open,onClose,nav}){
           ))}
           </div>
         </div>
-        <div style={{flexShrink:0,padding:"10px 14px calc(11px + env(safe-area-inset-bottom))",background:C.card,borderTop:`1px solid ${C.border}`}}>
+        <div style={{flexShrink:0,padding:"10px 14px calc(11px + var(--safe-b))",background:C.card,borderTop:`1px solid ${C.border}`}}>
           <button className="cta press" onClick={onClose}
             style={{width:"100%",background:C.coral,color:"white",border:"none",borderRadius:99,padding:"12px 16px",fontSize:14,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:"pointer"}}>
             Start shopping →
@@ -12883,7 +12897,7 @@ function BottomNav({page,nav,cartCount,ordersCount=0}){
   return(
     <div className="mobile-bottom-nav" style={{position:"absolute",bottom:0,left:0,right:0,zIndex:100}}>
       {/* Bottom nav tabs */}
-      <div style={{background:C.navBg,backdropFilter:"blur(20px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingTop:"8px",paddingBottom:"calc(14px + env(safe-area-inset-bottom, 0px))"}}>
+      <div style={{background:C.navBg,backdropFilter:"blur(20px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingTop:"8px",paddingBottom:"calc(14px + var(--safe-b))"}}>
         {tabs.map(t=>{
           const on=active===t.id;
           return(
@@ -12954,7 +12968,7 @@ function AdminExitConfirm({onStay,onLeave}){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(17,24,39,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:4000}} onClick={onStay}>
       <div className="slide-up" onClick={e=>e.stopPropagation()}
-        style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(22px + env(safe-area-inset-bottom))",boxShadow:"0 -12px 40px rgba(0,0,0,.25)"}}>
+        style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(22px + var(--safe-b))",boxShadow:"0 -12px 40px rgba(0,0,0,.25)"}}>
         <div style={{fontSize:32,textAlign:"center",marginBottom:10}}>⚠️</div>
         <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:20,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>Leave the Admin panel?</div>
         <div style={{fontSize:13,color:C.textSub,lineHeight:1.6,marginBottom:18,textAlign:"center"}}>
@@ -13180,7 +13194,7 @@ function PosterReel({posters=[],start=0,onClose}){
       )}
 
       {/* zoom controls */}
-      <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:12,padding:"12px 18px calc(14px + env(safe-area-inset-bottom))",background:"rgba(0,0,0,.35)"}}>
+      <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:12,padding:"12px 18px calc(14px + var(--safe-b))",background:"rgba(0,0,0,.35)"}}>
         <button className="press" onClick={()=>applyScale(scale-0.5)} style={btn} aria-label="Zoom out">−</button>
         <input type="range" min="1" max="5" step="0.1" value={scale} onChange={e=>applyScale(Number(e.target.value))} style={{flex:1,accentColor:C.accent,height:4}}/>
         <button className="press" onClick={()=>applyScale(scale+0.5)} style={btn} aria-label="Zoom in">+</button>
@@ -15553,7 +15567,7 @@ function NemoStore(){
           had nothing below it, and why the space appeared the moment a keyboard shrank the
           viewport. Added here rather than to twenty page paddings: it is one fact about the
           device, and the pages should not each have to remember it. */}
-      <div ref={scrollRef} className="nemo-main-scroll" onTouchStart={onTabTouchStart} onTouchEnd={onTabTouchEnd} style={{flex:1,overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain",paddingBottom:"env(safe-area-inset-bottom, 0px)"}}>
+      <div ref={scrollRef} className="nemo-main-scroll" onTouchStart={onTabTouchStart} onTouchEnd={onTabTouchEnd} style={{flex:1,overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain",paddingBottom:"var(--safe-b)"}}>
         <div key={page} className="page-swap">
         {page==="home"     &&<HomePage nav={nav} products={shopProducts} mediaCache={mediaCache} addToCart={addToCart} cartMap={cartMap} setCategory={setCategory} onSecretTap={handleSecretTap} setQuery={setQuery} query={query} user={user} settings={settings} settingsReady={settingsReady} favorites={favorites} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} orders={orders} showcase={showcase} onShowcaseSubmit={handleShowcaseSubmit} onShowcaseVote={handleShowcaseVote} totmVotes={totmVotes} tankPreviousWinners={tankPreviousWinners} restockSet={restockSet} onRestock={handleRestock} walletPts={walletPts} testimonials={testimonials} onTestimonialSubmit={handleTestimonialSubmit} hydrated={hydrated} openMenuSignal={homeMenuSignal} onMenuOpened={()=>setHomeMenuSignal(0)}/>}
         {page==="shop"     &&<ShopPage nav={nav} products={shopProducts} mediaCache={mediaCache} query={query} setQuery={setQuery} category={category} setCategory={setCategory} addToCart={addToCart} cartMap={cartMap} favorites={favorites} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} restockSet={restockSet} onRestock={handleRestock} hydrated={hydrated}/>}
@@ -15594,7 +15608,7 @@ function NemoStore(){
         const showFree=left>0 && (!dc || left<=dc.need);
         return(
           <button className="press floating-cart-bar" onClick={()=>setMiniOpen(true)}
-            style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:"calc(76px + env(safe-area-inset-bottom))",zIndex:90,width:"calc(100% - 28px)",maxWidth:440,background:"#0f172a",color:"white",border:"none",borderRadius:99,padding:"7px 8px 7px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,boxShadow:"0 14px 34px rgba(15,23,42,.35)",fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:"pointer"}}>
+            style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:"calc(76px + var(--safe-b))",zIndex:90,width:"calc(100% - 28px)",maxWidth:440,background:"#0f172a",color:"white",border:"none",borderRadius:99,padding:"7px 8px 7px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,boxShadow:"0 14px 34px rgba(15,23,42,.35)",fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:"pointer"}}>
             <span style={{fontSize:12,fontWeight:700,textAlign:"left",lineHeight:1.3,minWidth:0,flex:1,overflow:"visible",textOverflow:"clip",whiteSpace:"normal"}}>
               {showFree?<>🚚 Add <b style={{color:"#fda4af"}}>₹{left}</b> more for free delivery</>
                :dc?<>🏷️ Add <b style={{color:"#fda4af"}}>₹{dc.need}</b> more to get <b>{dc.off}</b></>
