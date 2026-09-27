@@ -6131,6 +6131,39 @@ function Toast({msg,type,onDone}){
 function Spinner(){
   return <div style={{width:20,height:20,border:`3px solid ${C.border}`,borderTopColor:C.primary,borderRadius:"50%",animation:"spin .7s linear infinite"}}/>;
 }
+/* A WebView with no connection still opens — the service worker holds the code — so the store
+   renders and the catalogue thumbnails come out of the cache. Only the full-size photo on a
+   product page comes up blank, because that one is fetched per view. Nothing is broken, but
+   nothing on screen says so either, and a blank photo reads as a defect rather than as a missing
+   network. This bar is the one thing that tells the customer which of the two it is.
+
+   navigator.onLine is the cheap half of the answer and it only ever errs optimistically: it
+   reports whether the radio is up, not whether anything is reachable. That is the right trade
+   here. The online/offline events are what actually drive the bar, and a phone that claims to be
+   online while it is not simply shows nothing — exactly today's behaviour, not a regression.
+
+   Deliberately not a toast: a toast dismisses itself after three seconds, and the thing worth
+   saying here stays true until the connection comes back. */
+function OfflineBar(){
+  const [off,setOff]=useState(()=>{ try{ return navigator.onLine===false; }catch(e){ return false; } });
+  useEffect(()=>{
+    const up=()=>setOff(false), down=()=>setOff(true);
+    window.addEventListener("online",up); window.addEventListener("offline",down);
+    // The events can have fired before this mounted (a cold start with the radio already off).
+    try{ setOff(navigator.onLine===false); }catch(e){}
+    return ()=>{ window.removeEventListener("online",up); window.removeEventListener("offline",down); };
+  },[]);
+  if(!off) return null;
+  return(
+    <div role="status" aria-live="polite"
+      style={{position:"fixed",top:0,left:0,right:0,zIndex:9300,background:"#0f172a",color:"white",
+        paddingTop:"calc(env(safe-area-inset-top, 0px) + 9px)",paddingBottom:9,paddingLeft:16,paddingRight:16,
+        fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:12,fontWeight:700,textAlign:"center",
+        lineHeight:1.4,boxShadow:"0 6px 20px rgba(15,23,42,.35)"}}>
+      No internet — connect to see photos and place an order
+    </div>
+  );
+}
 /* ═══════════════════ ANIMATED BETTA LOGO ═══════════════════ */
 function BettaLogo({size=64, glow=true}){
   return(
@@ -8259,7 +8292,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.5627bf90";
+const APP_BUILD = "v90.147b6d24";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -15384,6 +15417,7 @@ function NemoStore(){
     <div className="nemo-app" style={{fontFamily:"'Plus Jakarta Sans',sans-serif",background:C.bg,maxWidth:430,margin:"0 auto",position:"relative",overflow:"hidden",display:"flex",flexDirection:"column"}}>
       <style>{STYLES}</style>
       {toast&&<Toast msg={toast.msg} type={toast.type} onDone={()=>setToast(null)}/>}
+      <OfflineBar/>
       {adminExitAsk&&<AdminExitConfirm onStay={()=>setAdminExitAsk(false)} onLeave={()=>{setAdminExitAsk(false);nav("home");}}/>}
       {appExitAsk&&<AppExitConfirm onStay={()=>{appExitAskRef.current=false;setAppExitAsk(false);}} onExit={()=>{try{window.close();}catch(e){}}}/>}
       {!isAdminPage&&<WhyNemoPopup open={whyOpen} onClose={()=>setWhyOpen(false)} nav={nav}/>}
