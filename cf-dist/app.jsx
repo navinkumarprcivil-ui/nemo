@@ -8359,7 +8359,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.59597c49";
+const APP_BUILD = "v90.cd00ec6b";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -11012,13 +11012,23 @@ function DetailPage({product:p,products=[],mediaCache={},media={images:[],video:
      NemoAndroid.printDocument(html, jobName)  → PrintManager. Its dialog always lists
                                                 "Save as PDF", so printing and saving are one
                                                 method, never two.
-     NemoAndroid.sharePdf(html, jobName)       → render to a PDF in cacheDir and hand it out
-                                                through a FileProvider, as a real attachment.
+     NemoAndroid.sharePdf(html, jobName)       → never implemented, and not expected to be.
+                                                Android offers no supported way to get a PDF
+                                                FILE out of a WebView: PrintDocumentAdapter's
+                                                two result callbacks have package-private
+                                                constructors, so app code cannot drive the
+                                                adapter by hand, and every route round that is
+                                                either a blocked non-SDK API or a screen render
+                                                that ignores @media print. The way to a file is
+                                                the print dialog's own "Save as PDF"
+                                                destination. docs/ANDROID.md has the full
+                                                reasoning; the check below stays because it
+                                                costs nothing.
 
-   Both are given the document's ORIGINAL html rather than the fitted copy below: each generated
-   document already carries an @media print block that hides .np and undoes the fit transform,
-   so what prints is the clean A4 sheet and not the phone-shaped one. Until a build ships those
-   methods, Share still falls back to the itemised text — see invoiceShareText. */
+   printDocument is given the document's ORIGINAL html rather than the fitted copy below: each
+   generated document already carries an @media print block that hides .np and undoes the fit
+   transform, so what prints is the clean A4 sheet and not the phone-shaped one. Share falls back
+   to the itemised text — see invoiceShareText. */
 const DOC_FIT_CSS=`<style>
   html{-webkit-text-size-adjust:100%}
   body{padding-bottom:40px}
@@ -11048,9 +11058,10 @@ function DocViewer({doc,onClose,showToast}){
     catch(e){ console.warn("printDocument failed",e&&e.message); showToast&&showToast("Couldn't open the print dialog","error"); }
   };
 
-  /* A PDF of the document itself is what people actually want to send — the itemised text was
-     only ever a stand-in for a file a WebView could not produce. Prefer the file; keep the text
-     for builds without the bridge, and for the clipboard when there is no share sheet at all. */
+  /* A file is what people actually want to send, and the itemised text is a stand-in for one a
+     WebView cannot produce. It stays the stand-in: no Android build offers sharePdf, for the
+     reason recorded above. Someone who wants the document itself uses Print and picks the
+     dialog's "Save as PDF". The branch below is kept for the day the platform grows an API. */
   const doShare=async()=>{
     if(canSharePdf){
       try{ bridge.sharePdf(src, jobName); return; }

@@ -341,7 +341,7 @@ That matches the rest of the evidence: this app loads no bitmaps of its own, and
 decodes images in native code without touching `BitmapFactory`. Leave it. An image-loading
 library cannot be added to code this project does not own.
 
-### Printing is not wired up, and that is the next app change
+### Printing, and why sharing the PDF as a file is not possible
 
 A WebView cannot open a `blob:` URL. It hands the URL to Android as an intent, no app claims
 it, and the customer gets **"No compatible app found"** — which is what Quick Bill and Invoice
@@ -356,7 +356,7 @@ screen; without `allow-same-origin` the frame still keeps an opaque origin and c
 nothing of the app. The header's **Share** button sends the itemised bill as text, because text
 is the only thing a WebView can produce.
 
-**What version 15 needs: printing, and saving as a PDF.** Both, from one change — Android's
+**Version 15 added printing, and saving as a PDF.** Both, from one change — Android's
 system print dialog always lists *Save as PDF* as a destination alongside any real printer, so
 `PrintManager` delivers the save for free. There is no separate PDF path to build, and no
 reason to ship the print half without it.
@@ -395,10 +395,9 @@ fun printDocument(html: String, jobName: String) = runOnUiThread {
 }
 ```
 
-**Sharing has to hand over the same PDF.** Asked for directly: the Share button should send the
-document, not a description of it. Text was never the intent — it was the only thing a WebView
-could produce. That needs a second method, because `PrintManager` hands its output to the print
-spooler and gives the app no file:
+**Sharing the PDF as a file is not possible, and version 15 is where that was found out.** The
+Share button should send the document rather than a description of it — text was never the intent,
+only the one thing a WebView could produce. The obvious second method looked like this:
 
 ```kotlin
 @JavascriptInterface
@@ -407,60 +406,110 @@ fun sharePdf(html: String, jobName: String)   // render → PDF in cacheDir → 
 
 Same off-screen `WebView` and the same `createPrintDocumentAdapter()`, but driven by hand rather
 than handed to `PrintManager`: `onLayout(...)`, then `onWrite(...)` against a
-`ParcelFileDescriptor` opened on a file in `cacheDir`. Then `FileProvider.getUriForFile(...)` and
-an `ACTION_SEND` of type `application/pdf` with `FLAG_GRANT_READ_URI_PERMISSION`. That needs a
-`<provider android:name="androidx.core.content.FileProvider">` in the manifest and a
-`res/xml/file_paths.xml` with a `<cache-path>` entry — without the grant flag the receiving app
-gets a `SecurityException` and the share silently does nothing.
+`ParcelFileDescriptor` opened on a file in `cacheDir`.
 
-**The web half is already deployed and waiting.** `DocViewer` asks the bridge per method, not per
-version, and renders each button only if its method is there — so nothing dead appears on a phone
-still running 14, and both buttons light up the moment the build ships:
+**It does not compile, and the reason is structural rather than a detail to work around.**
+`PrintDocumentAdapter.LayoutResultCallback` and `PrintDocumentAdapter.WriteResultCallback` have
+**package-private constructors**. The print framework constructs them and hands them to an
+adapter's `onLayout`/`onWrite`; application code was never meant to instantiate one, and Kotlin
+says so outright:
+
+```
+Cannot access 'constructor(): PrintDocumentAdapter.LayoutResultCallback':
+it is package-private in 'android/print/PrintDocumentAdapter.LayoutResultCallback'
+```
+
+Three ways round it were weighed and all three rejected:
+
+- **A helper class declared in `package android.print`.** The widely-copied `PdfPrint` trick, and
+  it does compile — same package, so the constructor is reachable. But a package-private member
+  of a platform class is a non-SDK interface, and non-SDK access is blocked for apps targeting
+  API 28 and above; this app targets 36. It would most likely throw at runtime, and a hidden API
+  has no business in an app that takes payments.
+- **`PrintedPdfDocument` plus `webView.draw(canvas)`.** Entirely public API, but it draws the
+  *screen* rendering, so `@media print` never applies: the document's own controls would appear in
+  the file and the fit transform would not be undone. It also depends on the WebView's CSS
+  viewport, which follows device density, so the sheet can come out as the narrow phone layout.
+- **Rendering the PDF in JavaScript.** Adds a rasterising library to a 1.3 MB bundle for a
+  lower-quality result than the platform already gives away.
+
+**What ships instead is `printDocument` alone.** Android's print dialog always lists *Save as PDF*
+beside any real printer, and that route renders with **print media** — so it honours `@page` and
+the `@media print` block, paginates properly, and produces a better sheet than anything the app
+could draw for itself. The supported path is also the correct one. A customer who wants to send an
+invoice saves it and shares the file. Do not attempt an in-app file-sharing method again without a
+new platform API to build it on.
+
+**The web half was already deployed.** `DocViewer` asks the bridge per method, not per version, and
+renders each button only if its method is there — so nothing dead appeared on a phone still running
+14, and Print lit up the moment 15 shipped:
 
 | Bridge method | Button |
 |---|---|
 | `NemoAndroid.printDocument(html, jobName)` | **Print** — the dialog's own destination list carries *Save as PDF* |
-| `NemoAndroid.sharePdf(html, jobName)` | **Share** — prefers the file, falls back to today's text |
+| `NemoAndroid.sharePdf(html, jobName)` | never implemented, see above. The feature detection stays because it costs nothing; Share keeps the itemised text |
 
-Both are handed the document's original HTML, not the phone-fitted copy `DocViewer` displays, so
-the `@media print` block applies and the output is the A4 sheet with its controls hidden. The
-credit note, which passes no share text at all, gains a working Share button for the first time.
+`printDocument` is handed the document's original HTML, not the phone-fitted copy `DocViewer`
+displays, so the `@media print` block applies and the output is the A4 sheet with its controls
+hidden.
 
-## What version code 15 should carry
+## What version code 15 carries
 
-Release 14 drew three recommended actions and no issue with a deadline. **Only one of the three
-is this app's to clear.** Shipping a bundle has fixed overhead, so the list below is what makes
-the trip worth taking, in value order; the flag-clearing is the cheapest item on it, not the
-reason for the release.
+Built 27 September 2026 as `versionCode = 15`, `versionName = "2.1.0"`. Release 14 drew three
+recommended actions and no issue with a deadline, and only one of the three was this app's to
+clear; the flag-clearing is the cheapest item below, not the reason for the release.
 
-1. **`PrintManager`, with Save as PDF.** The actual feature — see *Printing is not wired up*
-   above for the three things that decide whether it works. This is what version 15 is for.
-2. **Share the PDF, not the bill as text.** `sharePdf` in the bridge — see *Printing is not
-   wired up* for the FileProvider it needs. The web half is deployed; this is what switches it on.
-3. **Bump `activityKtx` from `1.8.0`.** This is the whole of the edge-to-edge work — the call is
-   already in `MainActivity`, and `mapping.txt` shows 1.8.0's own `EdgeToEdgeApi23/26/29` making
-   the deprecated calls Play flags. Take the current stable, not a number from this file. It is
-   the only lever on both edge-to-edge actions, and it is unproven until 15 comes back clean.
-   **Check the bars below Android 15 anyway.** Not because of the call — that has shipped and been
-   seen working — but because a version jump this wide can move inset behaviour on older
-   releases. The on-device check was Android 15, where `targetSdk` 36 forces edge-to-edge
-   regardless; look at the header under the status bar and the bottom nav against the navigation
-   bar on an Android 13 or 14 device or emulator.
-4. **A monochrome notification icon.** `ic_launcher` is what ships today and Android flattens it
-   to a white silhouette.
-5. **Drop `android:usesCleartextTraffic="true"`.** The app only ever loads
-   `https://www.nemoaquastore.in`. It was left in during the qualifying run because a
-   third-party subresource over http would fail silently, and only in release — so exercise
-   payments, sign-in and sharing on the release build after removing it.
+1. **`printDocument`, with Save as PDF.** The feature this release exists for. `MainActivity`
+   gained one `@JavascriptInterface` method, a private `renderDocument()` helper and a
+   `docWebView` field — see *Printing* above for the three things that decide whether it works,
+   and for why the sharing half is not here. **Verified on a device before the bundle was built:**
+   the Print button appears on Invoice, Quick Bill and the credit note; the preview is the document
+   alone rather than the store page wrapped round it; and *Save as PDF* produces an A4 sheet at
+   full width with the on-screen controls hidden.
+2. **`activityKtx` 1.8.0 → 1.13.0.** The whole of the edge-to-edge work: the call is already in
+   `MainActivity` and `mapping.txt` showed 1.8.0's own `EdgeToEdgeApi23/26/29` making the
+   deprecated calls Play flags. A five-minor jump that needed nothing else moved with it —
+   `coreKtx` 1.10.1, `appcompat` 1.6.1 and `material` 1.14.0 all stayed where they were.
+   **This remains a hypothesis.** It is proven only when Play's report on 15 comes back without
+   both edge-to-edge actions. And **the bars below Android 15 are still unverified**: the
+   on-device check was Android 15, where `targetSdk` 36 forces edge-to-edge regardless, and a jump
+   this wide can move inset behaviour on older releases. The header under the status bar and the
+   bottom nav against the navigation bar want a look on an Android 13 or 14 device or emulator.
+3. **A monochrome notification icon.** `res/drawable/ic_notification.xml`, a flat white fish
+   silhouette, replacing `R.mipmap.ic_launcher` at `NemoMessagingService`. Android keeps only the
+   alpha channel and tints the result, so the full-colour launcher icon was arriving as a
+   shapeless blob. `.setColor(0xFF0EA5E9)` went in with it — the site's own primary — so a push
+   reads as Nemo in the shade. A vector is safe here because `minSdk` is 24; on 21–23 it would
+   have needed generated PNG densities instead.
+4. **`android:usesCleartextTraffic="true"` removed.** The app only ever loads
+   `https://www.nemoaquastore.in`. It was left in during the qualifying run because a third-party
+   subresource over http would fail silently, and only in release. One trap: the attribute closed
+   the `<application>` tag's attribute list, so the `>` had to move up to the line above rather
+   than the line simply being deleted.
+5. **`MainActivity.kt.bak` deleted.** It never compiled and could not affect the build, but it
+   answered every `grep` alongside the real file and had already cost one round of confusion.
 
-**The bitmap flag is the one to leave alone.** `mapping.txt` resolves the two classes Play names
-to `_COROUTINE._BOUNDARY` and `kotlin.jvm.internal.TypeIntrinsics` — Kotlin runtime artefacts,
-not code that decodes anything — so the report is naming coroutine stack frames inside a
-dependency. There is no file here to open and nothing to migrate. It carries no deadline.
+**The bitmap flag was left alone, deliberately.** `mapping.txt` resolves the two classes Play names
+to `_COROUTINE._BOUNDARY` and `kotlin.jvm.internal.TypeIntrinsics` — Kotlin runtime artefacts, not
+code that decodes anything — so the report is naming coroutine stack frames inside a dependency.
+There is no file here to open and nothing to migrate. It carries no deadline.
 
-Also delete `app/src/main/java/in/nemoaquastore/app/MainActivity.kt.bak`. It does not compile
-and cannot affect the build, but it answers `grep` alongside the real file and has already
-cost one round of confusion.
+**A FileProvider was added and then taken back out.** A `<provider>` naming
+`androidx.core.content.FileProvider` and a `res/xml/file_paths.xml` with a `<cache-path>` went in
+for `sharePdf`, and came out when that proved impossible. An app that takes payments should not
+ship a component with nothing to serve. Both are two commands away if a platform API ever makes
+sharing a file possible.
+
+**Measured on the release bundle.** `app-release.aab` 3,653,297 bytes, against 14's 3.6 MB.
+Uncompressed DEX 2,464,244 bytes, against Play's 10 MB threshold. `mapping.txt` carries
+`in.nemoaquastore.app.MainActivity$AndroidShareBridge -> in.nemoaquastore.app.MainActivity$AndroidShareBridge:`
+and `void printDocument(java.lang.String,java.lang.String) -> printDocument`, both unrenamed. That
+is the check that matters: the method is only ever called from JavaScript by name, so R8 renaming
+it would break the button in release builds only, which is the worst shape a bug can take.
+
+**One warning left standing.** `MainActivity.kt:1005`, a deprecated `Task<String>` in the Firebase
+messaging token call. Unrelated to anything in 15 and not touched.
+
 
 ## Still open
 
