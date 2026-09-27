@@ -1742,13 +1742,6 @@ async function saveOneProd(p, list){
    and handed straight to the UI. Parking every customer's orders — names, phones, addresses —
    in the shared key leaked them to whoever opened the app next on that device. */
 const ADMIN_ORDER_CACHE = "nemo-orders-admin";
-/* Both order caches, emptied together. They are separate keys for privacy but a single thing
-   to forget, and a reset that cleared only one left the other holding the data it was asked
-   to erase. */
-async function clearOrderCaches(){
-  await dbSet("nemo-orders","[]");
-  await dbSet(ADMIN_ORDER_CACHE,"[]");
-}
 async function loadOrders()  { // admin: ALL orders (flattened from orders/<uid>/<id>)
   if(FB_OK){
     const s=await withTimeout(FB_DB.ref("orders").get(),6000);
@@ -3566,96 +3559,6 @@ async function deleteTestimonial(id){
   try{ const r=await dbGet("nemo-testimonials"); const arr=r?JSON.parse(r):[]; await dbSet("nemo-testimonials",JSON.stringify(arr.filter(x=>x.id!==id))); }catch(e){}
   return cloudOk;
 }
-/* ── Go-live reset — wipe every order placed during testing ────────────────────────────
-   One-time tool for the switch from test stage to live trading: it removes the orders and
-   everything the store derived from them, so day one starts from a genuinely empty book
-   (and the analytics dashboard, which reads these same orders, starts empty with it).
-
-   Deleted: every order (with its payment screenshot, which is stored on the order record),
-   the per-day order-number counters, saved abandoned carts, the daily promo-usage counters,
-   and — when asked — wallet/loyalty balances earned from those test orders.
-
-   NEVER touched: products, media, settings, guides, reviews, showcase, testimonials, and
-   the purchase / supplier-invoice side of the books (`purchases`, `stockLedger`), which is
-   real money spent and is what the analytics app's purchase register reads. There is no
-   code path here that writes to those nodes.
-
-   Firebase rules only grant deletes on the leaf paths, not on the collection roots, so
-   every node is removed child by child. Anything that survives is counted and reported
-   back rather than silently swallowed — a non-zero `remaining` almost always means the
-   session isn't signed in with the admin Google account. */
-async function resetAllOrderData({wipeWallets=true, wipeAnalytics=false}={}){
-  const report={orders:0, remaining:0, wallets:0, carts:0, seq:0};
-  if(!FB_OK || !FB_DB){ try{ await clearOrderCaches(); }catch(e){} return report; }
-  const uids=new Set();
-  // Orders — orders/<uid>/<orderId>
-  try{
-    const s=await withTimeout(FB_DB.ref("orders").get(),8000); const v=s&&s.val();
-    if(v) for(const uid of Object.keys(v)){
-      const byUser=v[uid];
-      if(!byUser||typeof byUser!=="object") continue;
-      uids.add(uid);
-      for(const oid of Object.keys(byUser)){
-        try{ await FB_DB.ref("orders/"+uid+"/"+oid).remove(); report.orders++; }catch(e){}
-      }
-    }
-  }catch(e){}
-  // Order-number counters, so live order numbers restart at 001 for the day.
-  try{
-    const s=await withTimeout(FB_DB.ref("orderSeq").get(),6000); const v=s&&s.val();
-    if(v) for(const day of Object.keys(v)){ try{ await FB_DB.ref("orderSeq/"+day).remove(); report.seq++; }catch(e){} }
-  }catch(e){}
-  // Abandoned carts left behind by test sessions.
-  try{
-    const s=await withTimeout(FB_DB.ref("abandonedCarts").get(),6000); const v=s&&s.val();
-    if(v) for(const uid of Object.keys(v)){ try{ await FB_DB.ref("abandonedCarts/"+uid).remove(); report.carts++; }catch(e){} }
-  }catch(e){}
-  // Daily promo-usage counters (deal slots "claimed" by test checkouts). The rules put the
-  // write permission on the counter itself, so delete at that depth — a remove one level up
-  // has no rule granting it and would be refused.
-  try{
-    const s=await withTimeout(FB_DB.ref("promoUsage").get(),6000); const v=s&&s.val();
-    if(v) for(const day of Object.keys(v)){
-      const types=v[day]&&typeof v[day]==="object"?Object.keys(v[day]):[];
-      for(const t of types){ try{ await FB_DB.ref("promoUsage/"+day+"/"+t).remove(); }catch(e){} }
-    }
-  }catch(e){}
-  // Wallet points earned by test orders. Only the customers who actually placed one are
-  // touched — the loyalty root isn't readable, so this is the complete set anyway.
-  if(wipeWallets){
-    for(const uid of uids){
-      try{ await FB_DB.ref("loyalty/"+uid).remove(); report.wallets++; }catch(e){}
-      try{ localStorage.removeItem(loyaltyKey(uid)); }catch(e){}
-    }
-  }
-  // Visitor / funnel counters, if the admin also wants the traffic numbers to start at zero.
-  // Same story as promoUsage — the write rules sit on the individual counters.
-  if(wipeAnalytics){
-    try{
-      const s=await withTimeout(FB_DB.ref("analytics").get(),6000); const v=s&&s.val()||{};
-      try{ await FB_DB.ref("analytics/total").remove(); }catch(e){}
-      for(const grp of ["daily","funnel","search"]){
-        const node=v[grp];
-        if(node&&typeof node==="object") for(const k of Object.keys(node)){ try{ await FB_DB.ref("analytics/"+grp+"/"+k).remove(); }catch(e){} }
-      }
-      const ev=v.events;
-      if(ev&&typeof ev==="object") for(const type of Object.keys(ev)){
-        const keys=ev[type]&&typeof ev[type]==="object"?Object.keys(ev[type]):[];
-        for(const k of keys){ try{ await FB_DB.ref("analytics/events/"+type+"/"+k).remove(); }catch(e){} }
-      }
-    }catch(e){}
-  }
-  // Local caches on this device — including the admin's every-customer snapshot, which would
-  // otherwise survive a reset and keep other people's orders readable on this machine.
-  try{ await clearOrderCaches(); }catch(e){}
-  // Re-read to report anything the rules refused to delete.
-  try{
-    const s=await withTimeout(FB_DB.ref("orders").get(),8000); const v=s&&s.val();
-    if(v) for(const byUser of Object.values(v)){ if(byUser&&typeof byUser==="object") report.remaining+=Object.keys(byUser).length; }
-  }catch(e){}
-  return report;
-}
-
 /* ── Account deletion — remove ONE user's personal data (Play "delete my account") ──
    Deletes the cloud nodes keyed to this user. Order / payment records are intentionally
    NOT touched here — they're retained for tax & accounting law (see /delete-account.html).
@@ -8436,7 +8339,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.310eee44";
+const APP_BUILD = "v90.77460e99";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -14874,16 +14777,6 @@ function NemoStore(){
     for(const o of old){ await deleteOrderHandler(o); }
     return old.length;
   };
-  /* Go-live reset — clears every test order. Guarded by the admin uid check as well as the
-     UI's confirmation flow, because this is the one action in the panel with no undo. */
-  const resetOrderDataHandler=async opts=>{
-    if(!isAdminUid(user?.uid)){ showToast("⚠ Sign in with the admin Google account first","error"); return null; }
-    const report=await resetAllOrderData(opts||{});
-    setOrders([]);
-    setWalletPts(0);
-    setAbandonedCarts([]);
-    return report;
-  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -15638,7 +15531,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onResetOrderData={resetOrderDataHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

@@ -54,3 +54,15 @@ test('live-fish packing settings are hidden while live fish are off', () => {
   /* Hidden, not removed: the values must still be in the file to come back with the switch. */
   assert.ok(app.includes('liveFishRestrictNCIndia'), 'the live-fish settings were deleted rather than hidden');
 });
+
+/* The "Go Live — Clear Test Orders" button was removed once the store was trading. It deleted
+   every order regardless of age or status and had no memory of having run, so after the first
+   real sale it would have offered to wipe that sale as a "test order". The owner's rule since
+   then is that nothing is deleted after going live, and orders are GST records. */
+test('there is no button that deletes the whole order book', () => {
+  for (const gone of ['resetAllOrderData', 'onResetOrderData', 'DELETE ALL ORDERS', 'Clear Test Orders']){
+    assert.ok(!app.includes(gone), `"${gone}" is back in app.jsx`);
+  }
+  // Order-number counters are only ever cleared by a reset of this kind.
+  assert.doesNotMatch(app, /ref\("orderSeq\/"\+[^)]*\)\.remove\(\)/, 'something removes order-number counters');
+});

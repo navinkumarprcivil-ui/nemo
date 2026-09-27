@@ -1742,13 +1742,6 @@ async function saveOneProd(p, list){
    and handed straight to the UI. Parking every customer's orders — names, phones, addresses —
    in the shared key leaked them to whoever opened the app next on that device. */
 const ADMIN_ORDER_CACHE = "nemo-orders-admin";
-/* Both order caches, emptied together. They are separate keys for privacy but a single thing
-   to forget, and a reset that cleared only one left the other holding the data it was asked
-   to erase. */
-async function clearOrderCaches(){
-  await dbSet("nemo-orders","[]");
-  await dbSet(ADMIN_ORDER_CACHE,"[]");
-}
 async function loadOrders()  { // admin: ALL orders (flattened from orders/<uid>/<id>)
   if(FB_OK){
     const s=await withTimeout(FB_DB.ref("orders").get(),6000);
@@ -3565,96 +3558,6 @@ async function deleteTestimonial(id){
   try{ const r=await dbGet("nemo-testimonials"); const arr=r?JSON.parse(r):[]; await dbSet("nemo-testimonials",JSON.stringify(arr.filter(x=>x.id!==id))); }catch(e){}
   return cloudOk;
 }
-/* ── Go-live reset — wipe every order placed during testing ────────────────────────────
-   One-time tool for the switch from test stage to live trading: it removes the orders and
-   everything the store derived from them, so day one starts from a genuinely empty book
-   (and the analytics dashboard, which reads these same orders, starts empty with it).
-
-   Deleted: every order (with its payment screenshot, which is stored on the order record),
-   the per-day order-number counters, saved abandoned carts, the daily promo-usage counters,
-   and — when asked — wallet/loyalty balances earned from those test orders.
-
-   NEVER touched: products, media, settings, guides, reviews, showcase, testimonials, and
-   the purchase / supplier-invoice side of the books (`purchases`, `stockLedger`), which is
-   real money spent and is what the analytics app's purchase register reads. There is no
-   code path here that writes to those nodes.
-
-   Firebase rules only grant deletes on the leaf paths, not on the collection roots, so
-   every node is removed child by child. Anything that survives is counted and reported
-   back rather than silently swallowed — a non-zero `remaining` almost always means the
-   session isn't signed in with the admin Google account. */
-async function resetAllOrderData({wipeWallets=true, wipeAnalytics=false}={}){
-  const report={orders:0, remaining:0, wallets:0, carts:0, seq:0};
-  if(!FB_OK || !FB_DB){ try{ await clearOrderCaches(); }catch(e){} return report; }
-  const uids=new Set();
-  // Orders — orders/<uid>/<orderId>
-  try{
-    const s=await withTimeout(FB_DB.ref("orders").get(),8000); const v=s&&s.val();
-    if(v) for(const uid of Object.keys(v)){
-      const byUser=v[uid];
-      if(!byUser||typeof byUser!=="object") continue;
-      uids.add(uid);
-      for(const oid of Object.keys(byUser)){
-        try{ await FB_DB.ref("orders/"+uid+"/"+oid).remove(); report.orders++; }catch(e){}
-      }
-    }
-  }catch(e){}
-  // Order-number counters, so live order numbers restart at 001 for the day.
-  try{
-    const s=await withTimeout(FB_DB.ref("orderSeq").get(),6000); const v=s&&s.val();
-    if(v) for(const day of Object.keys(v)){ try{ await FB_DB.ref("orderSeq/"+day).remove(); report.seq++; }catch(e){} }
-  }catch(e){}
-  // Abandoned carts left behind by test sessions.
-  try{
-    const s=await withTimeout(FB_DB.ref("abandonedCarts").get(),6000); const v=s&&s.val();
-    if(v) for(const uid of Object.keys(v)){ try{ await FB_DB.ref("abandonedCarts/"+uid).remove(); report.carts++; }catch(e){} }
-  }catch(e){}
-  // Daily promo-usage counters (deal slots "claimed" by test checkouts). The rules put the
-  // write permission on the counter itself, so delete at that depth — a remove one level up
-  // has no rule granting it and would be refused.
-  try{
-    const s=await withTimeout(FB_DB.ref("promoUsage").get(),6000); const v=s&&s.val();
-    if(v) for(const day of Object.keys(v)){
-      const types=v[day]&&typeof v[day]==="object"?Object.keys(v[day]):[];
-      for(const t of types){ try{ await FB_DB.ref("promoUsage/"+day+"/"+t).remove(); }catch(e){} }
-    }
-  }catch(e){}
-  // Wallet points earned by test orders. Only the customers who actually placed one are
-  // touched — the loyalty root isn't readable, so this is the complete set anyway.
-  if(wipeWallets){
-    for(const uid of uids){
-      try{ await FB_DB.ref("loyalty/"+uid).remove(); report.wallets++; }catch(e){}
-      try{ localStorage.removeItem(loyaltyKey(uid)); }catch(e){}
-    }
-  }
-  // Visitor / funnel counters, if the admin also wants the traffic numbers to start at zero.
-  // Same story as promoUsage — the write rules sit on the individual counters.
-  if(wipeAnalytics){
-    try{
-      const s=await withTimeout(FB_DB.ref("analytics").get(),6000); const v=s&&s.val()||{};
-      try{ await FB_DB.ref("analytics/total").remove(); }catch(e){}
-      for(const grp of ["daily","funnel","search"]){
-        const node=v[grp];
-        if(node&&typeof node==="object") for(const k of Object.keys(node)){ try{ await FB_DB.ref("analytics/"+grp+"/"+k).remove(); }catch(e){} }
-      }
-      const ev=v.events;
-      if(ev&&typeof ev==="object") for(const type of Object.keys(ev)){
-        const keys=ev[type]&&typeof ev[type]==="object"?Object.keys(ev[type]):[];
-        for(const k of keys){ try{ await FB_DB.ref("analytics/events/"+type+"/"+k).remove(); }catch(e){} }
-      }
-    }catch(e){}
-  }
-  // Local caches on this device — including the admin's every-customer snapshot, which would
-  // otherwise survive a reset and keep other people's orders readable on this machine.
-  try{ await clearOrderCaches(); }catch(e){}
-  // Re-read to report anything the rules refused to delete.
-  try{
-    const s=await withTimeout(FB_DB.ref("orders").get(),8000); const v=s&&s.val();
-    if(v) for(const byUser of Object.values(v)){ if(byUser&&typeof byUser==="object") report.remaining+=Object.keys(byUser).length; }
-  }catch(e){}
-  return report;
-}
-
 /* ── Account deletion — remove ONE user's personal data (Play "delete my account") ──
    Deletes the cloud nodes keyed to this user. Order / payment records are intentionally
    NOT touched here — they're retained for tax & accounting law (see /delete-account.html).
@@ -15035,7 +14938,7 @@ function AdminExitConfirm({onStay,onLeave}){
 }
 
 /* ═══════════════════ ADMIN HUB (Dashboard + Orders) ═══════════════════ */
-function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onDeleteOrder,onCleanupOrders,onResetOrderData,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
+function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onDeleteOrder,onCleanupOrders,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
   const [tab,setTab]=useState("orders"); // orders | products | reviews | requests | guides | settings | form | orderDetail
   const showcaseActionRef=useRef(new Set());
   const [showcaseAction,setShowcaseAction]=useState({});
@@ -15116,18 +15019,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
   },[backRef,tab]);
   const [cleanMonths,setCleanMonths]=useState(6);
   const [cleanConfirm,setCleanConfirm]=useState(false);
-  /* Go-live reset. Every gate is its own bit of state so the final button can only light up
-     once all of them are satisfied, and any change to the options re-arms the whole flow. */
-  const RESET_PHRASE="DELETE ALL ORDERS";
-  const [resetOpen,setResetOpen]=useState(false);
-  const [resetBackedUp,setResetBackedUp]=useState(false);
-  const [resetAck1,setResetAck1]=useState(false);
-  const [resetAck2,setResetAck2]=useState(false);
-  const [resetWallets,setResetWallets]=useState(true);
-  const [resetAnalytics,setResetAnalytics]=useState(false);
-  const [resetTyped,setResetTyped]=useState("");
-  const [resetBusy,setResetBusy]=useState(false);
-  const closeReset=()=>{ setResetOpen(false); setResetBackedUp(false); setResetAck1(false); setResetAck2(false); setResetTyped(""); };
   const [thumbBusy,setThumbBusy]=useState(false);
   const [thumbMsg,setThumbMsg]=useState("");
   const [visitStats,setVisitStats]=useState(null);
@@ -15661,97 +15552,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
               );
             })()}
           </div>
-
-          {/* ── Go live: clear the test order book ──────────────────────────────────────
-              Separate from "Clean Up Old Orders" on purpose. That one is routine housekeeping
-              on a trading store; this is the one-time switch from testing to real trading, it
-              takes everything regardless of age or status, and it can't be undone — so it is
-              gated behind a backup, two acknowledgements and a typed phrase. */}
-          {(()=>{
-            const n=orders.length;
-            const value=orders.reduce((s,o)=>s+(Number(o.amountDue ?? ((Number(o.total)||0)+(Number(o.fee)||0)))||0),0);
-            const dates=orders.map(o=>String(o.placedAt||"").slice(0,10)).filter(Boolean).sort();
-            const day=d=>new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
-            const span=dates.length?(dates[0]===dates[dates.length-1]?day(dates[0]):`${day(dates[0])} → ${day(dates[dates.length-1])}`):"";
-            const live=orders.filter(o=>["Confirmed","Shipped","Delivered"].includes(o.status)).length;
-            const ready=resetBackedUp&&resetAck1&&resetAck2&&resetTyped.trim().toUpperCase()===RESET_PHRASE&&!resetBusy;
-            const check=(on,set,label,note)=>(
-              <label style={{display:"flex",gap:9,alignItems:"flex-start",marginBottom:9,cursor:"pointer"}}>
-                <input type="checkbox" checked={on} onChange={e=>set(e.target.checked)} style={{marginTop:2,width:16,height:16,accentColor:C.danger,flexShrink:0}}/>
-                <span style={{fontSize:12,color:C.text,lineHeight:1.5}}>{label}{note&&<span style={{display:"block",fontSize:10,color:C.textSub}}>{note}</span>}</span>
-              </label>
-            );
-            return(
-              <div style={{background:C.card,borderRadius:16,padding:"14px",marginBottom:14,border:`1.5px solid ${resetOpen?C.danger:C.border}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <span style={{fontSize:16}}>🚀</span>
-                  <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:800,color:C.text}}>Go Live — Clear Test Orders</span>
-                </div>
-                <div style={{fontSize:11,color:C.textSub,marginBottom:10,lineHeight:1.5}}>
-                  Run this <b>once</b>, just before the store opens for real customers. It permanently deletes <b>every order ever placed</b> — whatever its age or status — so your books, order numbers and the analytics dashboard all start from zero on day one.
-                </div>
-                <div style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 12px",marginBottom:10,fontSize:11,lineHeight:1.6,color:C.text}}>
-                  <div style={{fontWeight:800,color:C.danger,marginBottom:4}}>Will be deleted</div>
-                  <div style={{color:C.textSub}}>All {n} order{n!==1?"s":""} &amp; their payment screenshots · daily order-number counters · saved abandoned carts · daily deal-usage counters{resetWallets?" · customer wallet / loyalty points":""}{resetAnalytics?" · visitor & funnel counters":""}</div>
-                  <div style={{fontWeight:800,color:C.success,margin:"8px 0 4px"}}>Never touched</div>
-                  <div style={{color:C.textSub}}>Products, photos, stock, prices, settings, care guides, reviews, customer tanks &amp; testimonials — and the entire <b>purchase side</b> (supplier bills, purchase register, stock ledger). Money you have spent is left exactly as it is.</div>
-                </div>
-                {n===0
-                  ? <div style={{fontSize:12,fontWeight:700,color:C.success,padding:"4px 0"}}>✓ Order book is already empty — nothing to clear.</div>
-                  : !resetOpen
-                  ? <button className="press" onClick={()=>setResetOpen(true)}
-                      style={{width:"100%",background:"#fff",color:C.danger,border:`1.5px solid ${C.danger}`,borderRadius:12,padding:"11px",fontSize:12,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-                      🚀 Clear all {n} test order{n!==1?"s":""}…
-                    </button>
-                  : (
-                  <div style={{background:"#fef2f2",border:`1.5px solid ${C.danger}`,borderRadius:12,padding:"12px"}}>
-                    <div style={{fontSize:12,fontWeight:800,color:C.danger,marginBottom:6,lineHeight:1.5}}>
-                      ⚠ About to permanently delete {n} order{n!==1?"s":""} worth ₹{value.toLocaleString("en-IN")}{span?` (${span})`:""}. This cannot be undone.
-                    </div>
-                    {live>0&&(
-                      <div style={{fontSize:11,fontWeight:700,color:"#7f1d1d",background:"#fee2e2",border:"1px solid #fca5a5",borderRadius:8,padding:"9px 10px",marginBottom:10,lineHeight:1.5}}>
-                        🛑 {live} of these {live===1?"is":"are"} Confirmed / Shipped / Delivered. If any of them is a <b>real</b> customer order, stop — deleting it destroys a record you may need for GST and for that customer's warranty claim.
-                      </div>
-                    )}
-                    <div style={{fontSize:11,fontWeight:800,color:C.text,marginBottom:6}}>Step 1 — take a backup</div>
-                    <button className="press" onClick={()=>{ const k=exportOrdersCSV(orders,"","",settings,walletBalances); stampExport(); setResetBackedUp(true); showToast(k?`Backed up ${k} order${k!==1?"s":""} ✓`:"Nothing to back up — you can continue"); }}
-                      style={{width:"100%",marginBottom:4,background:resetBackedUp?"#fff":"#107c41",color:resetBackedUp?"#107c41":"white",border:`1.5px solid #107c41`,borderRadius:12,padding:"11px",fontSize:12,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-                      {resetBackedUp?"✓ Backup downloaded — download again":"⬇ Download backup (required)"}
-                    </button>
-                    <div style={{fontSize:10,color:"#7f1d1d",marginBottom:12,lineHeight:1.5}}>Keep this file. It is the only copy of these orders once the reset runs.</div>
-
-                    <div style={{fontSize:11,fontWeight:800,color:C.text,marginBottom:6}}>Step 2 — confirm what you're doing</div>
-                    {check(resetAck1,setResetAck1,`I understand all ${n} order${n!==1?"s":""} and their payment screenshots will be permanently deleted, with no way to restore them.`)}
-                    {check(resetAck2,setResetAck2,"These are test orders only — the store has not yet traded with a real paying customer.")}
-                    {check(resetWallets,v=>{setResetWallets(v);setResetTyped("");},"Also reset customer wallet / loyalty points","Points earned by test orders. Leave on unless a real customer already holds a balance.")}
-                    {check(resetAnalytics,v=>{setResetAnalytics(v);setResetTyped("");},"Also reset visitor & funnel counters","Website traffic numbers. Optional — unrelated to orders.")}
-
-                    <div style={{fontSize:11,fontWeight:800,color:C.text,margin:"12px 0 6px"}}>Step 3 — type <span style={{fontFamily:"monospace",background:"#fff",border:`1px solid ${C.border}`,borderRadius:4,padding:"1px 5px"}}>{RESET_PHRASE}</span> to unlock</div>
-                    <input value={resetTyped} onChange={e=>setResetTyped(e.target.value)} placeholder={RESET_PHRASE} autoCapitalize="characters" autoCorrect="off" spellCheck={false}
-                      style={{width:"100%",boxSizing:"border-box",borderRadius:12,border:`1.5px solid ${resetTyped&&resetTyped.trim().toUpperCase()!==RESET_PHRASE?C.danger:C.border}`,padding:"11px",fontSize:13,fontWeight:700,letterSpacing:".05em",fontFamily:"monospace",background:"#fff",color:C.text,marginBottom:12}}/>
-
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <button className="press" disabled={resetBusy} onClick={closeReset}
-                        style={{background:"white",color:C.text,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",opacity:resetBusy?.5:1}}>Cancel</button>
-                      <button className="press" disabled={!ready} onClick={async()=>{
-                        setResetBusy(true);
-                        showToast("Clearing test orders…");
-                        const r=await onResetOrderData({wipeWallets:resetWallets,wipeAnalytics:resetAnalytics});
-                        setResetBusy(false);
-                        if(!r){ return; }   // handler already explained why (not signed in as admin)
-                        closeReset();
-                        if(r.remaining>0) showToast(`⚠ ${r.remaining} order${r.remaining>1?"s":""} couldn't be removed — sign in with the admin Google account, then run it again`,"error");
-                        else showToast(`✓ Store is live-ready — cleared ${r.orders} order${r.orders!==1?"s":""}`);
-                      }}
-                        style={{background:ready?C.danger:"#fca5a5",color:"white",border:"none",borderRadius:12,padding:"12px",fontSize:13,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:ready?"pointer":"not-allowed"}}>
-                        {resetBusy?"Clearing…":"Delete all orders"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
 
           {/* Speed up the storefront — migrate product photos to the fast catalog model */}
           {(()=>{
@@ -19471,16 +19271,6 @@ function NemoStore(){
     for(const o of old){ await deleteOrderHandler(o); }
     return old.length;
   };
-  /* Go-live reset — clears every test order. Guarded by the admin uid check as well as the
-     UI's confirmation flow, because this is the one action in the panel with no undo. */
-  const resetOrderDataHandler=async opts=>{
-    if(!isAdminUid(user?.uid)){ showToast("⚠ Sign in with the admin Google account first","error"); return null; }
-    const report=await resetAllOrderData(opts||{});
-    setOrders([]);
-    setWalletPts(0);
-    setAbandonedCarts([]);
-    return report;
-  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -20234,7 +20024,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onResetOrderData={resetOrderDataHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}
