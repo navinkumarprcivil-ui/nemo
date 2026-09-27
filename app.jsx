@@ -2371,7 +2371,7 @@ async function deleteReview(pid,rid){
 const COURIER_COLLECT_TERM = "Tracking & collection: once your order is dispatched we share the courier partner and consignment number. Please keep tracking your parcel and collect it from the courier partner as soon as it reaches your area. Door delivery depends entirely on the courier partner and is not in our hands, so we request every customer to put in that effort and take delivery of the package at the earliest — especially when ordering live fish or plants, where every extra hour the parcel spends in transit or lying at the hub affects the livestock. Loss or deterioration caused by a parcel left uncollected, collected late, refused, or returned undelivered is not covered by the Live Arrival Guarantee or by any refund or reward coins.";
 
 /* Store settings (WhatsApp numbers, payment) — shared via Firebase */
-const DEFAULT_SETTINGS = { ownerWhatsapp:BUSINESS_WA, supporterWhatsapp:"", supporterEnabled:false, storeAddress:"", storeHours:"", orderEmail:"", instagramUrl:"", facebookUrl:"", storeLogo:"", emailjsService:"", emailjsTemplate:"", emailjsKey:"", upiId:"", upiName:STORE_NAME, website:"", bankAccountName:"", bankName:"", bankBranch:"", bankAccountNo:"", bankIfsc:"", invoiceSignature:"",
+const DEFAULT_SETTINGS = { ownerWhatsapp:BUSINESS_WA, storeAddress:"", storeHours:"", orderEmail:"", instagramUrl:"", facebookUrl:"", storeLogo:"", emailjsService:"", emailjsTemplate:"", emailjsKey:"", upiId:"", website:"", bankAccountName:"", bankName:"", bankBranch:"", bankAccountNo:"", bankIfsc:"", invoiceSignature:"",
   aboutStory:"Nemo Aqua Store is a passionate home-based aquarium business. We hand-pick healthy, vibrant fish, live plants, and quality accessories — and deliver them with care to fellow hobbyists. Every order is packed personally to make sure your aquatic friends arrive happy and healthy.",
   deliveryAreas:"We currently deliver across the city and nearby areas. Live fish are delivered on selected days to ensure safe, short transit. Please provide a complete, correct address and stay reachable on the delivery day — deliveries that fail due to a wrong address, no response, or no one available are not covered by our guarantees and may incur a re-delivery charge. Contact us on WhatsApp to confirm delivery to your location.",
   liveArrivalGuarantee:"Live Arrival Guarantee is included free with every live fish order shipped on our recommended Premium Delivery parcel — there is no separate charge. Because temperature and transit conditions vary by area and season, you may instead choose a normal parcel based on your location and weather; orders sent by normal parcel are not covered by the guarantee.\n\nTo make a claim you must send ONE clear, continuous, unedited unboxing video — starting with the sealed, unopened package and clearly showing the affected fish — to our WhatsApp within 2 hours of delivery. We review the video and, if the claim is approved, you choose either a refund of the affected fish value or the same value as reward coins. The guarantee covers the price of the affected fish only — delivery/shipping charges are not refundable.\n\nApproved reward coins are added to your Nemo wallet. Approved refunds are returned through the applicable payment method. The guarantee does not apply without a valid unboxing video, if our acclimatization steps were not followed, to wrong/incomplete addresses, failed or refused deliveries, or to any loss after the fish has been placed in your tank.",
@@ -16517,11 +16517,6 @@ function SettingsPanel({settings,onSave,products=[]}){
       {/* WhatsApp */}
       <Collapsible icon="💬" title="WhatsApp Notifications">
         {field("Your WhatsApp Number","ownerWhatsapp","919876543210","With country code, no + or spaces. New orders open here. Changing this needs a code emailed to your admin email.")}
-        <label style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,cursor:"pointer",userSelect:"none"}}>
-          <input type="checkbox" checked={!!f.supporterEnabled} onChange={e=>set("supporterEnabled",e.target.checked)} style={{width:18,height:18,accentColor:C.primary}}/>
-          <span style={{fontSize:13,color:C.text,fontWeight:600}}>Also notify a support team member</span>
-        </label>
-        {f.supporterEnabled&&field("Supporter's WhatsApp Number","supporterWhatsapp","919123456780","Shown a 'notify support' button on each new order.")}
       </Collapsible>
 
       {/* Store contact (shown on home page) */}
@@ -16836,7 +16831,6 @@ function SettingsPanel({settings,onSave,products=[]}){
           </div>
         </div>
         {field("UPI ID (invoice only)","upiId","yourname@oksbi","Optional business UPI reference printed on invoices; it is not a checkout fallback.")}
-        {field("UPI Display Name","upiName","Nemo Aqua Store")}
         {/* Printed in the "Bank & Payment Details" box on every invoice — a business buyer's
             accountant needs an account to pay into and something to reconcile against. All
             optional: any field left blank simply doesn't print. */}
