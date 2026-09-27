@@ -6001,6 +6001,30 @@ img.smooth-img[data-loaded="1"]{opacity:1;}
    own entrance animation so it remains centred after the animation completes. */
 @keyframes floatingCartIn{from{transform:translate(-50%,16px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
 .floating-cart-bar{position:fixed !important;left:50% !important;bottom:calc(76px + env(safe-area-inset-bottom)) !important;transform:translateX(-50%) !important;animation:floatingCartIn .25s cubic-bezier(.22,1,.36,1) both;}
+/* The offline notice, in the one part of the screen where nothing important lives.
+
+   It spent three revisions pinned to the top, getting smaller each time, and that could never
+   work: a top:0 overlay covers the header whatever its height, so shrinking it only made a smaller
+   thing cover the coin balance and the avatar. In the installed app it was worse still, because
+   edge-to-edge means its padding also has to span the status bar.
+
+   Down here it covers nothing. Being offline is ambient information — it explains why the
+   photos are missing — so it belongs where a status toast goes, not where a warning goes.
+   It shares the bottom stack with the cart bar, so it takes the same 76px step over the nav,
+   and pointer-events:none keeps it from ever swallowing a tap meant for the page. */
+.offline-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 78px);
+  z-index:9300;max-width:calc(100% - 28px);background:#0f172a;color:#fff;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:11.5px;font-weight:700;line-height:1.3;
+  padding:7px 15px;border-radius:999px;box-shadow:0 6px 18px rgba(15,23,42,.34);
+  text-align:center;pointer-events:none;}
+/* Step over the Add-to-cart bar when one is on screen so the two never stack on each other.
+   A browser too old for :has() simply keeps the lower slot, which is the same overlap the cart
+   bar already tolerated — it degrades to untidy, never to unusable. */
+body:has(.floating-cart-bar) .offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 134px);}
+/* Both widths that hide .mobile-bottom-nav: with no nav to clear, sit near the edge. */
+@media(min-width:1000px){.offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);}}
+@media(min-width:820px) and (max-width:999px) and (orientation:landscape){
+  .offline-pill{bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);}}
 @media(min-width:1000px){
   /* Surround matches the app background exactly, so the centred column blends into the page
      (no visible frame / dark band, regardless of window width) */
@@ -6215,16 +6239,10 @@ function OfflineBar(){
     return ()=>{ window.removeEventListener("online",up); window.removeEventListener("offline",down); };
   },[]);
   if(!off) return null;
+  /* Styling lives in .offline-pill rather than inline, because clearing the cart bar needs a
+     sibling-aware selector that an inline style cannot express. */
   return(
-    /* Kept to a strip. It sits over the header rather than pushing the page down — reflowing
-       the whole layout every time a lift or a train takes the signal would be worse than
-       covering something — so every pixel it takes is a pixel of the store it hides. At 12px
-       with 9px of padding it was eating the coin balance and the avatar. */
-    <div role="status" aria-live="polite"
-      style={{position:"fixed",top:0,left:0,right:0,zIndex:9300,background:"#0f172a",color:"white",
-        paddingTop:"calc(env(safe-area-inset-top, 0px) + 5px)",paddingBottom:5,paddingLeft:14,paddingRight:14,
-        fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:11,fontWeight:700,textAlign:"center",
-        lineHeight:1.35,boxShadow:"0 4px 14px rgba(15,23,42,.3)"}}>
+    <div className="offline-pill" role="status" aria-live="polite">
       No internet — connect to see photos and order
     </div>
   );
@@ -8370,7 +8388,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.9cafe17c";
+const APP_BUILD = "v90.8585c120";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
