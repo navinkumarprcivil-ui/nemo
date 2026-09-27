@@ -9634,7 +9634,7 @@ function AquaToolsPage({nav,goBack,user,settings={}}){
   );
 }
 
-function HomePage({nav,products,mediaCache,addToCart,cartMap,setCategory,onSecretTap,setQuery,query,user,settings={},settingsReady=true,favorites=[],onFav,interestedSet=[],onInterest,orders=[],showcase=[],onShowcaseSubmit,onShowcaseVote,totmVotes={},tankPreviousWinners=null,restockSet=[],onRestock,walletPts=0,testimonials=[],onTestimonialSubmit,hydrated=true,openMenuSignal=0,onMenuOpened}){
+function HomePage({nav,products,mediaCache,addToCart,cartMap,setCategory,onSecretTap,setQuery,query,user,settings={},settingsReady=true,ordersReady=true,favorites=[],onFav,interestedSet=[],onInterest,orders=[],showcase=[],onShowcaseSubmit,onShowcaseVote,totmVotes={},tankPreviousWinners=null,restockSet=[],onRestock,walletPts=0,testimonials=[],onTestimonialSubmit,hydrated=true,openMenuSignal=0,onMenuOpened}){
   const featured=[...products].sort(byAvailabilityThen()).slice(0,6);
   const [menuOpen,setMenuOpen]=useState(false);
   const [walletOpen,setWalletOpen]=useState(false);
@@ -9808,7 +9808,7 @@ function HomePage({nav,products,mediaCache,addToCart,cartMap,setCategory,onSecre
         {/* Seasonal / festival banner */}
 
         {/* First-order welcome coupon */}
-        {settingsReady&&<OfferBanners settings={settings} orders={orders}/>}
+        {settingsReady&&ordersReady&&<OfferBanners settings={settings} orders={orders}/>}
 
         {/* Food re-order reminder */}
         <FoodReorderBanner orders={orders} products={products} addToCart={addToCart} nav={nav}/>
@@ -18253,6 +18253,14 @@ function NemoStore(){
      rather than patching each call site means a settings write added later cannot forget. */
   const setSettings = (next) => { applyLiveFishSwitch(next); setSettingsState(next); };
   const [settingsReady,setSettingsReady] = useState(false);
+  /* Whether we yet know what this shopper has already bought. The promo popup filters its
+     coupons through usableCoupons(settings, orders, ...), and a first-order offer is usable
+     only while orders is empty — which it is on every cold start, before the listener below
+     answers. On a fresh install there is no cached list to stand in, so the popup opened on
+     an empty one and dangled a welcome offer at returning customers for about a second
+     before correcting itself. settingsReady already guards the settings half of that filter;
+     this is the other half. */
+  const [ordersReady,setOrdersReady] = useState(false);
   const [user,setUser]             = useState(null);
   const [authReturn,setAuthReturn] = useState("orders"); // where to go after login
   const [reviewedSet,setReviewedSet] = useState([]);
@@ -20090,20 +20098,27 @@ function NemoStore(){
 
   // CUSTOMER: live listener on THEIR orders (reflects admin status updates instantly)
   useEffect(()=>{
-    if(!user || page==="admin") return;
+    // Nobody signed in means there is no history to wait for, and a guest genuinely qualifies
+    // for a first-order offer — so the popup should not be held back.
+    if(!user){ setOrdersReady(true); return; }
+    if(page==="admin") return;
     const uid=userKey(user);
-    if(!uid) return;
+    if(!uid){ setOrdersReady(true); return; }
     if(FB_OK && FB_DB){
       const ref=FB_DB.ref("orders/"+uid);
       const cb=ref.on("value",snap=>{
         const v=snap.val();
         const mine=v?Object.values(v).filter(o=>o&&o.id).sort((x,y)=>(y.placedAt||"").localeCompare(x.placedAt||"")):[];
         setOrders(mine);
+        setOrdersReady(true);
         try{ localStorage.setItem("nemo-orders",JSON.stringify(mine)); }catch(e){}
-      },err=>{ loadUserOrders(uid).then(o=>o&&setOrders(o)); });
-      return ()=>ref.off("value",cb);
+      },err=>{ loadUserOrders(uid).then(o=>{ if(o)setOrders(o); setOrdersReady(true); }); });
+      /* A shopper on a dead connection must not lose the popup for good. The wait exists to stop
+         a wrong offer being shown, not to make the right one conditional on the network. */
+      const guard=setTimeout(()=>setOrdersReady(true),4000);
+      return ()=>{ clearTimeout(guard); ref.off("value",cb); };
     } else {
-      loadUserOrders(uid).then(o=>o&&setOrders(o));
+      loadUserOrders(uid).then(o=>{ if(o)setOrders(o); setOrdersReady(true); });
     }
   },[user,page,fbReady]);
 
@@ -20172,7 +20187,7 @@ function NemoStore(){
           device, and the pages should not each have to remember it. */}
       <div ref={scrollRef} className="nemo-main-scroll" onTouchStart={onTabTouchStart} onTouchEnd={onTabTouchEnd} style={{flex:1,overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain",paddingBottom:"var(--safe-b)"}}>
         <div key={page} className="page-swap">
-        {page==="home"     &&<HomePage nav={nav} products={shopProducts} mediaCache={mediaCache} addToCart={addToCart} cartMap={cartMap} setCategory={setCategory} onSecretTap={handleSecretTap} setQuery={setQuery} query={query} user={user} settings={settings} settingsReady={settingsReady} favorites={favorites} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} orders={orders} showcase={showcase} onShowcaseSubmit={handleShowcaseSubmit} onShowcaseVote={handleShowcaseVote} totmVotes={totmVotes} tankPreviousWinners={tankPreviousWinners} restockSet={restockSet} onRestock={handleRestock} walletPts={walletPts} testimonials={testimonials} onTestimonialSubmit={handleTestimonialSubmit} hydrated={hydrated} openMenuSignal={homeMenuSignal} onMenuOpened={()=>setHomeMenuSignal(0)}/>}
+        {page==="home"     &&<HomePage nav={nav} products={shopProducts} mediaCache={mediaCache} addToCart={addToCart} cartMap={cartMap} setCategory={setCategory} onSecretTap={handleSecretTap} setQuery={setQuery} query={query} user={user} settings={settings} settingsReady={settingsReady} ordersReady={ordersReady} favorites={favorites} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} orders={orders} showcase={showcase} onShowcaseSubmit={handleShowcaseSubmit} onShowcaseVote={handleShowcaseVote} totmVotes={totmVotes} tankPreviousWinners={tankPreviousWinners} restockSet={restockSet} onRestock={handleRestock} walletPts={walletPts} testimonials={testimonials} onTestimonialSubmit={handleTestimonialSubmit} hydrated={hydrated} openMenuSignal={homeMenuSignal} onMenuOpened={()=>setHomeMenuSignal(0)}/>}
         {page==="shop"     &&<ShopPage nav={nav} products={shopProducts} mediaCache={mediaCache} query={query} setQuery={setQuery} category={category} setCategory={setCategory} addToCart={addToCart} cartMap={cartMap} favorites={favorites} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} restockSet={restockSet} onRestock={handleRestock} hydrated={hydrated}/>}
         {page==="detail"   &&<DetailPage product={selProduct} products={shopProducts} mediaCache={mediaCache} media={selProduct?getProductMedia(selProduct,mediaCache):{images:[],video:null}} settings={settings} addToCart={addToCart} cart={cart} nav={nav} goBack={goBack} user={user} orders={orders} goAuth={()=>goAuth("detail")} onReviewsChanged={recomputeProductRating} onReviewed={markReviewed} autoReview={reviewIntent===selProduct?.id} reviewPreset={reviewPreset} isFav={selProduct?favorites.includes(selProduct.id):false} onFav={toggleFav} isInterested={selProduct?interestedSet.includes(selProduct.id):false} onInterest={markInterested} restockSet={restockSet} onRestock={handleRestock}/>}
         {page==="cart"     &&<CartPage cart={cart} updateQty={updateQty} total={cartTotal} nav={nav} settings={settings} products={shopProducts} mediaCache={mediaCache} orders={orders}/>}
