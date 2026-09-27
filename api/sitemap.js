@@ -19,9 +19,19 @@ export default async function handler(req, res) {
        for two round trips. A guides node that cannot be read yields an empty list, which costs
        the sitemap its guide entries for one hour — the products are still listed. */
     const [cat, gcat] = await Promise.all([loadCatalogue(), loadGuides().catch(() => null)]);
-    // Search engines fetch this at most a few times a day; an hour at the edge
-    // is plenty and still picks up a new product the same day it is listed.
-    res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+    /* Search engines fetch this at most a few times a day; an hour at the edge is plenty and
+       still picks up a new product the same day it is listed.
+
+       But an hour is the wrong answer when the guides read is the thing that failed. gcat is
+       null only for a failed read now, never for an empty library, and a sitemap missing its
+       guide URLs is not a sitemap worth keeping that long — Google takes the omission as the
+       truth and drops pages it had already found. Five minutes instead, so the next crawl
+       asks again. The products in it are still correct either way, which is why this serves a
+       short-lived partial answer rather than an error. */
+    const ok = gcat !== null;
+    res.setHeader('Cache-Control', ok
+      ? 'public, s-maxage=3600, stale-while-revalidate=86400'
+      : 'public, s-maxage=300');
     return res.status(200).send(sitemapXml(cat, gcat));
   } catch (e) {
     // Serving an empty sitemap would ask Google to forget the whole site, so a

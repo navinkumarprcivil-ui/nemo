@@ -99,3 +99,26 @@ test('the app opens the guide a /guide/<slug> reader was already reading', () =>
   assert.match(app, /initialOpenId=\{guideOpenId\}/);
   assert.match(app, /useState\(initialOpenId\|\|null\)/);
 });
+
+/* The bug these two pin cost the live sitemap its guide URLs for an hour.
+   loadGuides collapsed a failed READ and a genuinely empty node into the same `[]`, so one
+   blip was cached as "this store has no guides" — and Google reads a missing URL as a
+   deletion, not as an outage. */
+test('loadGuides throws on a failed read instead of reporting an empty library', () => {
+  const src = readFileSync(new URL('../lib/catalog.mjs', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export async function loadGuides'));
+  const fn = body.slice(0, body.indexOf('\n}\n') + 3);
+  assert.match(fn, /if \(!res\.ok\) throw new Error/);
+  // No catch-to-null anywhere in the function: that is precisely what hid the failure.
+  assert.doesNotMatch(fn, /catch\(\s*\(\)\s*=>\s*null\s*\)/);
+  assert.doesNotMatch(fn, /\.catch\(\s*\(\)\s*=>\s*null\s*\)/);
+});
+
+test('a sitemap that lost its guides is cached for minutes, not an hour', () => {
+  const src = readFileSync(new URL('../api/sitemap.js', import.meta.url), 'utf8');
+  assert.match(src, /const ok = gcat !== null;/);
+  assert.match(src, /s-maxage=3600, stale-while-revalidate=86400/);
+  assert.match(src, /s-maxage=300/);
+  // The long TTL must be the OK branch, never the fallback.
+  assert.ok(src.indexOf('s-maxage=3600') < src.indexOf('s-maxage=300'));
+});
