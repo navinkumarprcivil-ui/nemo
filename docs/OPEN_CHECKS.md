@@ -128,6 +128,47 @@ test, and no device or emulator that old has been tried.
 
 ---
 
+## Comes due on its own — not triggered by anything going wrong
+
+The three items above this line are things that were done and need observing. These are different:
+nothing is wrong with them, and nothing will look wrong until it is late.
+
+### Play's target API level, roughly every August
+
+Google raises the minimum `targetSdk` an app may ship once a year, with the deadline near the end of
+August. Miss it and **you cannot publish an update at all** — existing installs keep working, but the
+listing freezes until a bundle targeting the new level goes up. It is the one thing that forces an
+Android release regardless of whether the app has a problem.
+
+`targetSdk` is **36** (Android 16) as of version 16, which is current, so there is room. Do not
+trust that sentence for the date: read **Play Console → Policy → App content**, or the target-API
+requirement page, and get the real deadline from Google rather than from this file. A year is long
+enough for the policy to move.
+
+Budget more than a version bump. Each level lands real behaviour changes — 35 brought edge-to-edge
+enforcement, which is the whole story in `docs/ANDROID.md` and cost ten attempts.
+
+### The admin orders read, before roughly 5,000 orders
+
+`loadOrders()` reads the whole `orders` node. It is fine at today's volume and it does not degrade
+gracefully; it gets slower and more expensive in proportion to every order ever placed. See *The
+admin orders listener* above for why the obvious fix does not fit the data shape.
+
+### The photo routine, after each batch
+
+Every product or guide photo added through Admin lives in the database as base64 until it is moved to
+`assets/media/`. One is nothing; a batch is how the 2025 bandwidth problem started. The routine is in
+`docs/BANDWIDTH.md` under *The routine that keeps it working* — run it after adding products, not
+after noticing a bill.
+
+### Where the upload key is
+
+Not a check, a single point of failure worth knowing you have. Only the original upload key can
+publish an update to `in.nemoaquastore.app`. Play App Signing means a lost key can be reset through
+Google rather than ending the listing, but that is a support process measured in days. Confirm the
+keystore and its passwords are backed up somewhere that is not just the one MacBook, and never in
+this repository — `android-twa/README.md` lists what must stay out of git.
+
 ## Not open — do not restart these without a fresh request
 
 Each of these was considered and dropped on purpose. They are listed so a later reader does not
