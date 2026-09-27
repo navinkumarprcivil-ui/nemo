@@ -54,28 +54,25 @@ JPEG quality for no reason. Prune first and the export is the backlog, which is 
 routine assumes.
 
 1. Firebase Console → Realtime Database → `media` → ⋮ → **Export JSON**
-2. Decode and shrink the new images (macOS; `sips` is built in, nothing to install):
+2. Decode and shrink them with `scripts/shrink-media.py`, from the folder holding the export:
 
-   ```bash
-   cd ~/Downloads && python3 - <<'PY'
-   import json, base64, os, glob
-   src = sorted(glob.glob("*media-export*.json"), key=os.path.getmtime)[-1]
-   out = os.path.expanduser("~/Downloads/media"); os.makedirs(out, exist_ok=True)
-   d = json.load(open(src)); n = 0
-   for k, v in d.items():
-       if not isinstance(v, str) or not v.startswith("data:") or "video" in v[:40]: continue
-       ext = "png" if "png" in v[:40] else "webp" if "webp" in v[:40] else "jpg"
-       open(os.path.join(out, f"{k}.{ext}"), "wb").write(base64.b64decode(v.partition(",")[2]))
-       n += 1
-   print(f"wrote {n} images to {out}")
-   PY
-   cd ~/Downloads/media && for f in *; do
-     base="${f%.*}"
-     case "$base" in *_thumb) max=320;; *) max=1000;; esac
-     sips -s format jpeg -Z $max --setProperty formatOptions 60 "$f" --out "$base.jpg" >/dev/null 2>&1
-     [ "$f" != "$base.jpg" ] && rm -f "$f"
-   done
    ```
+   pip install Pillow            # once
+   python scripts/shrink-media.py --repo /path/to/nemo
+   ```
+
+   It takes the newest `*media-export*.json` in the current directory and writes `./media/`,
+   capping a `_thumb` key at 320px and everything else at 1000px, JPEG quality 60. `--repo` points
+   it at the checkout so keys already in `assets/media/` are skipped — which is the prune's job
+   done a second way, and makes the step safe to run even if the prune has not been.
+
+   It also reports, separately rather than silently: rows that were already URLs instead of
+   base64, videos (which are **not** migrated and stay in the database), and anything it could not
+   decode. A count that does not add up is worth reading before uploading.
+
+   **This replaces an earlier `sips` recipe, which only ran on macOS**, and it is a file rather
+   than a pasted heredoc because `python3 - <<'PY'` is not valid in PowerShell or cmd. Transparency
+   is flattened onto white; `sips` flattened onto black without saying so.
 
 3. Upload the folder to `assets/media/` on GitHub (Add file → Upload files, commit to `main`)
 4. `node scripts/sync-media-list.mjs`, then rebuild and deploy
