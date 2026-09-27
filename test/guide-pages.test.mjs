@@ -122,3 +122,28 @@ test('a sitemap that lost its guides is cached for minutes, not an hour', () => 
   // The long TTL must be the OK branch, never the fallback.
   assert.ok(src.indexOf('s-maxage=3600') < src.indexOf('s-maxage=300'));
 });
+
+/* Fourteen guides sat in the database while the website said "New guides are on the way" and
+   the sitemap listed none of them. They were not samples and nothing had failed: loadGuides
+   required a non-empty `content`, and this store writes its guides as posters — content is ""
+   and hasImg is true. The filter that was added to let Google reach the care guides was the
+   thing keeping Google away from them. */
+test('a guide whose body is a poster is published, not filtered out', () => {
+  const src = readFileSync(new URL('../lib/catalog.mjs', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export async function loadGuides'));
+  const filter = body.slice(0, body.indexOf('isSampleGuideRecord'));
+  assert.match(filter, /String\(g\.content \|\| ''\)\.trim\(\) \|\| g\.hasImg/);
+});
+
+/* The page has to be worth the URL it is listed under. A poster guide carries its title as the
+   image's alt text and as the h1, so it is a real page rather than an empty frame. */
+test('an image-only guide still renders a titled page with its poster', () => {
+  const g = { id: 'gimg1', title: 'The Basic Needs of Bettas', category: 'Fish Care', content: '', hasImg: true };
+  const gcat = { guides: [g], slugMap: { gimg1: 'the-basic-needs-of-bettas' }, bySlug: {} };
+  const html = guidePage(g, gcat, cat);
+  assert.match(html, /<h1>The Basic Needs of Bettas<\/h1>/);
+  assert.match(html, /alt="The Basic Needs of Bettas"/);
+  // The description degrades to the title plus the store, never to a bare dash.
+  assert.match(html, /<meta name="description" content="The Basic Needs of Bettas — a care guide from/);
+  assert.match(html, new RegExp(`<link rel="canonical" href="${BASE}/guide/the-basic-needs-of-bettas"`));
+});
