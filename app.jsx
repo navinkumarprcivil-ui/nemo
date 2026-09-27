@@ -15767,7 +15767,7 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
                   <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:800,color:C.text}}>Speed Up Catalog</span>
                 </div>
                 <div style={{fontSize:11,color:C.textSub,marginBottom:10,lineHeight:1.5}}>
-                  Sets each product's <b>first photo</b> as its catalog thumbnail and shrinks it so the shop grid loads fast (full-size photos still open on the product page). Run it after adding products &amp; photos. Safe anytime — your full-size photos are never deleted. {needOpt>0?<b>{needOpt} product{needOpt!==1?"s":""} can be optimised.</b>:<span style={{color:C.success,fontWeight:700}}>All products optimised ✓</span>}
+                  Sets each product's <b>first photo</b> as its catalog thumbnail and shrinks it so the shop grid loads fast (full-size photos still open on the product page). The product editor already makes it when you save, so this is a repair tool — go by the line below rather than by habit. Safe anytime — your full-size photos are never deleted. {needOpt>0?<b>{needOpt} product{needOpt!==1?"s":""} can be optimised.</b>:<span style={{color:C.success,fontWeight:700}}>All products optimised ✓</span>}
                 </div>
                 <button className="press" disabled={thumbBusy||!needOpt} onClick={async()=>{
                   setThumbBusy(true); setThumbMsg("Optimising…");
@@ -16482,7 +16482,7 @@ function SettingsPanel({settings,onSave,products=[]}){
     <div className="dt-read" style={{padding:"18px 16px 100px"}}>
       {/* Settings are split into pages for ease — pick a section */}
       <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:16,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
-        {[["store","🏪 Store"],["payship","🚚 Payments & Shipping"],["hsn","🧾 GST & HSN"],["promos","🎁 Promotions"],["content","📄 Content"],["emails","🔐 Email & Security"]].map(([k,label])=>(
+        {[["store","🏪 Store"],["payship","🚚 Payments & Shipping"],["hsn","🧾 GST & HSN"],["promos","🎁 Promotions"],["content","📄 Content"],["emails","🔐 Email & Security"],["tools","🛠 Maintenance"]].map(([k,label])=>(
           <button key={k} className="press" onClick={()=>{if(sec===k)setSecOpen(v=>!v);else{setSec(k);setSecOpen(true);}}}
             aria-expanded={sec===k&&secOpen}
             style={{flexShrink:0,padding:"9px 14px",borderRadius:20,border:`1.5px solid ${sec===k&&secOpen?C.primary:C.border}`,background:sec===k&&secOpen?C.primary:"white",color:sec===k&&secOpen?"white":C.textSub,fontSize:12,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",whiteSpace:"nowrap",cursor:"pointer"}}>
@@ -16578,6 +16578,12 @@ function SettingsPanel({settings,onSave,products=[]}){
         {field("Order Notification Email (optional)","orderEmail","you@example.com","Where new-order alerts and your admin security codes are sent. Delivered via EmailJS (set the keys below). Changing this needs an email security code.","email")}
       </Collapsible>
 
+      {/* Visitor analytics */}
+      <Collapsible icon="📈" title="Visitor Analytics">
+        <div style={{fontSize:12,color:C.textSub,marginBottom:14,lineHeight:1.5}}>Basic visit counts already appear on your Orders dashboard — no setup needed. For detailed reports (traffic sources, devices, locations), create a free Google Analytics 4 property and paste its Measurement ID here.</div>
+        {field("Google Analytics ID (optional)","gaId","G-XXXXXXXXXX","From analytics.google.com → Admin → Data Streams → your web stream.")}
+      </Collapsible>
+
       </>)}
       {secOpen&&sec==="emails"&&(<>
       {/* Customer confirmation emails (EmailJS) */}
@@ -16611,12 +16617,6 @@ function SettingsPanel({settings,onSave,products=[]}){
             <span><span style={{fontSize:13,color:C.text,fontWeight:700}}>📥 Email me each new order</span><br/><span style={{fontSize:11,color:C.textSub}}>Sends the order-received copy to admin</span></span>
           </label>
         </div>
-      </Collapsible>
-
-      {/* Visitor analytics */}
-      <Collapsible icon="📈" title="Visitor Analytics">
-        <div style={{fontSize:12,color:C.textSub,marginBottom:14,lineHeight:1.5}}>Basic visit counts already appear on your Orders dashboard — no setup needed. For detailed reports (traffic sources, devices, locations), create a free Google Analytics 4 property and paste its Measurement ID here.</div>
-        {field("Google Analytics ID (optional)","gaId","G-XXXXXXXXXX","From analytics.google.com → Admin → Data Streams → your web stream.")}
       </Collapsible>
 
       {/* Admin security */}
@@ -16661,6 +16661,12 @@ function SettingsPanel({settings,onSave,products=[]}){
         </div>
 </Collapsible>)}
 
+      </>)}
+      {secOpen&&sec==="tools"&&(<>
+      {/* Maintenance, which is what these three always were. They sat under "Email & Security",
+          where a backup, a database prune and a cache clear have nothing to do with either — so
+          the tab holding the admin password also held the two buttons that are hardest to undo.
+          They are together now, and nowhere near it. */}
       {/* Data & Backup */}
       <Collapsible icon="💾" title="Data & Backup">
         <div style={{fontSize:12,color:C.textSub,marginBottom:12,lineHeight:1.5}}>Download a complete copy of your store — products, orders, settings, reviews and photos — as one file. Keep it safe (email it to yourself or save to Google Drive). To restore, use Firebase Console → Realtime Database → ⋮ → Import JSON.</div>
@@ -16939,7 +16945,13 @@ function SettingsPanel({settings,onSave,products=[]}){
         })}
       </Collapsible>
 
-      {/* Live-fish packing: thermacol charge chart + courier partners */}
+      {/* Live-fish packing: thermacol charge chart + courier partners.
+          Shown only while live fish are on sale. Every control in here — the delivery-region
+          restriction, the thermacol brackets, the courier list — applies to a category customers
+          cannot currently see, so with the switch off this is a page of settings that can change
+          nothing. Hidden rather than removed: turn Store → Live Fish back on and it returns with
+          its values intact, because nothing here is cleared. */}
+      {f.liveFishEnabled===true&&(
       <Collapsible icon="📦" title="Live-Fish Packing & Couriers">
         {/* Live-fish delivery region restriction */}
         <label style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:12,cursor:"pointer",userSelect:"none",background:f.liveFishRestrictNCIndia!==false?"#fef2f2":C.bg,borderRadius:12,padding:"11px 13px",border:`1.5px solid ${f.liveFishRestrictNCIndia!==false?"#fecaca":C.border}`}}>
@@ -17011,7 +17023,7 @@ function SettingsPanel({settings,onSave,products=[]}){
           style={{width:"100%",background:"white",border:`1.5px dashed ${C.primary}`,color:C.primary,borderRadius:12,padding:"10px",fontSize:12,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif",marginTop:2}}>
           ＋ Add Courier Partner
         </button>
-      </Collapsible>
+      </Collapsible>)}
 
       <Collapsible icon="🚚" title="Free Delivery">
         <div style={{maxWidth:260}}>
