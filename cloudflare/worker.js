@@ -10,6 +10,7 @@ import cronPush from '../api/cron-push.js';
 import sharePage from '../api/share.js';
 import productPage from '../api/product-page.js';
 import sitemap from '../api/sitemap.js';
+import guidePage from '../api/guide-page.js';
 import { loadStoreSettings } from '../lib/catalog.mjs';
 import { cdnMediaPath } from '../lib/media-cdn.mjs';
 
@@ -463,6 +464,14 @@ export default {
 
     if (path === '/sitemap.xml') {
       return cachedPage(request, ctx, () => runHandler(sitemap, request, url));
+    }
+
+    /* The care guides, reachable by a search engine for the first time. Same shape as /p/
+       below: rendered on request and cached at the edge, so publishing a guide is all it takes
+       to have one indexed. */
+    if (path === '/guide' || path.startsWith('/guide/')) {
+      const slug = path === '/guide' ? '' : decodeURIComponent(path.slice(7));
+      return cachedPage(request, ctx, () => runHandler(guidePage, request, withQuery(url, 'slug', slug)));
     }
 
     if (path === '/p' || path.startsWith('/p/')) {

@@ -201,8 +201,11 @@ console.log('sitemap');
 const xml = sitemapXml(cat);
 test('lists the home page, the shop and every product', () => {
   assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
-  assert.equal((xml.match(/<url>/g) || []).length, EXPECTED_COUNT + 2);   // home + /p/ + products
+  // home + /p/ + products + privacy + delete-account. Called without a guides argument there
+  // are no /guide/ entries; test/guide-pages.test.mjs covers that half.
+  assert.equal((xml.match(/<url>/g) || []).length, EXPECTED_COUNT + 4);
   assert.match(xml, /<loc>https:\/\/www\.nemoaquastore\.in\/p\/java-fern-p6<\/loc>/);
+  assert.doesNotMatch(xml, /\/guide\//);
 });
 test('contains no product that left the catalogue', () => {
   assert.ok(!xml.includes('planted-led-light'));

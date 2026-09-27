@@ -8370,7 +8370,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.185179dd";
+const APP_BUILD = "v90.9cafe17c";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -13173,9 +13173,11 @@ function PosterReel({posters=[],start=0,onClose}){
     </Portal>
   );
 }
-function CareGuidesPage({nav,goBack,guides,mediaCache}){
+function CareGuidesPage({nav,goBack,guides,mediaCache,initialOpenId=""}){
   const [cat,setCat]=useState("All");
-  const [openId,setOpenId]=useState(null);
+  /* Arriving from /guide/<slug>, the customer has already chosen which guide to read — landing
+     them on the list to find it again would be the same page they just left. */
+  const [openId,setOpenId]=useState(initialOpenId||null);
   const [zoom,setZoom]=useState(null); // {src,title,notes}
   const cats=["All",...GUIDE_CATEGORIES.filter(c=>guides.some(g=>g.category===c))];
   const list=cat==="All"?guides:guides.filter(g=>g.category===cat);
@@ -13938,6 +13940,19 @@ function NemoStore(){
       try{ window.history.replaceState({},"",window.location.pathname); }catch(e){}
     }
   },[products,shopProducts]);
+  /* The server-rendered /guide/<slug> pages send readers here with the guide they were
+     reading. Same one-shot shape as the product link above, resolved against the loaded guides
+     so a deleted one lands on the library rather than retrying forever. */
+  const deepGuideRef = useRef((()=>{ try{ return new URLSearchParams(window.location.search).get("guide")||""; }catch(e){ return ""; } })());
+  const [guideOpenId,setGuideOpenId] = useState("");
+  useEffect(()=>{
+    const gid=deepGuideRef.current;
+    if(!gid||!guides.length) return;
+    deepGuideRef.current=""; // fire once
+    if(guides.some(g=>g.id===gid)) setGuideOpenId(gid);
+    nav("guides");
+    try{ window.history.replaceState({},"",window.location.pathname); }catch(e){}
+  },[guides]);
   /* Coming back from a gateway that navigated away rather than opening a modal (PhonePe).
      The return itself proves nothing — a customer can reach this URL by typing it — so it is
      only a cue to ask our server to check the order with the gateway.
@@ -15534,7 +15549,7 @@ function NemoStore(){
           : <PhoneAuth mode="signin" settings={settings} onSuccess={(u)=>{setUser(u);setReviewedSet(loadReviewedSet(userKey(u)));if(u.keep!==false)saveUser(u);nav("home");}} onBack={goBack}/>)}
         {page==="auth"     &&<PhoneAuth mode="signin" settings={settings} onSuccess={handleLogin} onBack={goBack}/>}
         {page==="request"  &&<RequestPage nav={nav} goBack={goBack} user={user} onSubmit={submitRequest}/>}
-        {page==="guides"   &&<CareGuidesPage nav={nav} goBack={goBack} guides={guides} mediaCache={mediaCache}/>}
+        {page==="guides"   &&<CareGuidesPage nav={nav} goBack={goBack} guides={guides} mediaCache={mediaCache} initialOpenId={guideOpenId}/>}
         {page==="tools"    &&<AquaToolsPage nav={nav} goBack={goBack} user={user} settings={settings}/>}
         {page==="saved"    &&<SavedPage nav={nav} products={shopProducts} mediaCache={mediaCache} favorites={favorites} addToCart={addToCart} cartMap={cartMap} onFav={toggleFav} interestedSet={interestedSet} onInterest={markInterested} user={user} restockSet={restockSet} onRestock={handleRestock}/>}
         {page==="about"    &&<AboutPage nav={nav} goBack={goBack} settings={settings}/>} 
