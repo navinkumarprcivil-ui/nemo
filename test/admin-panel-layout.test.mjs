@@ -135,12 +135,52 @@ test('the server never deletes an order', () => {
   }
 });
 
-test('the database rules refuse to delete an order, even for the admin', () => {
+test('the database rules delete only a finished, year-old order, and only for an admin', () => {
+  /* Published 27 September 2026 at the owner's request, as the narrow exception behind Clean Up
+     Old Orders. Everything else about an order stays undeletable: a recent one, an open one, one
+     with a refund still owed, and anything a customer tries. The rule is evaluated here, not
+     pattern-matched, so a later edit that widens it fails on a real case. */
   const rules = JSON.parse(readFileSync(new URL('../database.rules.json', import.meta.url), 'utf8')).rules;
   // A write granted higher up cascades down and cannot be taken back, so nothing above may grant one.
   assert.equal(rules['.write'], false);
   assert.equal(rules.orders['.write'], undefined, 'orders/ grants a write, which would allow deletes');
-  assert.equal(rules.orders.$uid['.write'], undefined, 'orders/$uid grants a write, which would allow deletes');
-  const w = rules.orders.$uid.$oid['.write'];
-  assert.ok(w.startsWith('auth != null && newData.exists() && ('), `the order write rule does not require newData.exists() for everyone: ${w}`);
+  assert.equal(rules.orders.$uid['.write'], undefined, 'orders/$uid grants a write, which would allow a whole customer to be wiped');
+  const js = rules.orders.$uid.$oid['.write']
+    .replace(/(data|root)\.child\('([^']+)'\)\.isNumber\(\)/g, "(typeof get($1,'$2')==='number')")
+    .replace(/(data|root)\.child\('([^']+)'\)\.val\(\)/g, "get($1,'$2')")
+    .replace(/newData\.exists\(\)/g, '(newData!=null)');
+  assert.doesNotMatch(js, /\.child\(|\.val\(\)|\.exists\(\)/, 'the rule uses something this test cannot evaluate');
+  const rule = new Function('auth', 'root', 'data', 'newData', '$uid', 'now',
+    'const get=(o,p)=>p.split("/").reduce((x,k)=>x==null?null:(x[k]??null),o); return (' + js + ');');
+  const ADMIN = { uid: 'cI2HmMt6FdR7fO7uUnugH85GeZt2' }, CO = { uid: 'co1' }, CUST = { uid: 'cust1' };
+  const root = (orders) => ({ adminAccess: { coAdminUid: 'co1', permissions: { orders } } });
+  const now = Date.UTC(2030, 0, 1), DAY = 86400000;
+  const order = (ageDays, extra = {}) => ({ status: 'Delivered', paymentDeadline: now - ageDays * DAY, ...extra });
+  const del = (auth, o, perm = true) => rule(auth, root(perm), o, null, 'cust1', now);
+  const put = (auth, uid) => rule(auth, root(true), order(10), { status: 'Shipped' }, uid, now);
+
+  assert.equal(del(ADMIN, order(366)), true, 'admin, Delivered, a year old');
+  assert.equal(del(ADMIN, order(366, { status: 'Cancelled' })), true, 'admin, Cancelled, a year old');
+  assert.equal(del(CO, order(366)), true, 'co-admin with the orders permission');
+  assert.equal(del(CO, order(366), false), false, 'co-admin without the orders permission');
+  assert.equal(del(CUST, order(366)), false, 'a customer can never delete, even their own');
+  assert.equal(del(null, order(366)), false, 'signed out');
+  assert.equal(del(ADMIN, order(364)), false, 'less than a year old');
+  assert.equal(del(ADMIN, order(0)), false, 'a recent order');
+  for (const status of ['Awaiting Payment', 'Payment Review', 'Confirmed', 'Shipped', 'Return/Replacement'])
+    assert.equal(del(ADMIN, order(900, { status })), false, `unfinished: ${status}`);
+  assert.equal(del(ADMIN, order(900, { paymentDeadline: undefined })), false, 'no numeric date to check');
+  assert.equal(del(ADMIN, order(900, { paymentDeadline: String(now - 900 * DAY) })), false, 'a date stored as text');
+  assert.equal(del(ADMIN, order(900, { refund: { due: true, status: 'processing' } })), false, 'refund still owed');
+  assert.equal(del(ADMIN, order(900, { refund: { due: true, status: 'refunded' } })), true, 'refund paid');
+  assert.equal(del(ADMIN, order(900, { refund: { due: false, status: 'none' } })), true, 'no refund due');
+
+  // Ordinary writes are unchanged.
+  assert.equal(put(ADMIN, 'cust1'), true, 'admin updates an order');
+  assert.equal(put(CUST, 'cust1'), true, 'a customer writes their own order');
+  assert.equal(put(CUST, 'someone-else'), false, "a customer writes someone else's order");
+  assert.equal(put(null, 'cust1'), false, 'signed out');
+
+  // The age the delete depends on cannot be backdated by the customer once it is set.
+  assert.match(rules.orders.$uid.$oid.paymentDeadline['.validate'], /\|\| !data\.exists\(\) \|\| newData\.val\(\) === data\.val\(\)$/);
 });

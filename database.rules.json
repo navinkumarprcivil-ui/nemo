@@ -171,7 +171,7 @@
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && (root.child('adminAccess/permissions/orders').val() === true || root.child('adminAccess/permissions/dashboard').val() === true)))))",
         "$oid": {
-          ".write": "auth != null && newData.exists() && ( ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true))) || auth.uid === $uid )",
+          ".write": "auth != null && ( (newData.exists() && ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || auth.uid === $uid)) || (!newData.exists() && (auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) && (data.child('status').val() === 'Delivered' || data.child('status').val() === 'Cancelled') && data.child('paymentDeadline').isNumber() && data.child('paymentDeadline').val() < now - 31536000000 && (data.child('refund/due').val() !== true || data.child('refund/status').val() === 'refunded')) )",
           "id": {
             ".validate": "(auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || !data.exists() || newData.val() === data.val()"
           },
@@ -179,6 +179,9 @@
             ".validate": "(auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || !data.exists() || newData.val() === data.val()"
           },
           "placedAt": {
+            ".validate": "(auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || !data.exists() || newData.val() === data.val()"
+          },
+          "paymentDeadline": {
             ".validate": "(auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || !data.exists() || newData.val() === data.val()"
           },
           "userUid": {

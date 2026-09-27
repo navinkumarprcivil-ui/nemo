@@ -38,39 +38,37 @@ review naming an old phone is the signal to start building 17 rather than to wai
 
 ---
 
-## Settled — orders cannot be deleted (rules published 27 September 2026)
+## Now — publish the order-cleanup rule (changed 27 September 2026)
 
-`database.rules.json` changed on 27 September 2026: the write rule on `orders/$uid/$oid` now starts
-`auth != null && newData.exists() &&`, so **nobody can delete an order — not a customer, not the
-admin, not a co-admin**. The same day Go Live — Clear Test Orders and Delete This Order were removed from
-the admin, after real, paid, delivered orders from the gateway-testing period went missing from it.
-Clean Up Old Orders came back at the owner's request, narrowed: finished orders only, a year old at
-least, nothing open on them, backup downloaded first (`orderCleanupEligible` in `app.jsx`).
+The order rules went through two versions on 27 September 2026, both on the owner's instructions.
 
-**Decided 27 September 2026, to be done about September 2027.** Under these rules the database
-refuses the cleanup's deletes too, and the button reports them as "refused by the database and
-kept". No order can qualify until one is a year old, so nothing is lost by leaving the rules shut
-until then. The owner chose the narrow exception over keeping everything or deleting by hand in the
-Console: when the first orders turn a year old, change the `$oid` `.write` rule so **only the main
-admin or a co-admin with the orders permission** may delete an order, and only when it is
-**Delivered or Cancelled** and its `paymentDeadline` is **more than a year old**. Everything else
-stays undeletable. Prepare the rule and a test for it in the repo then; the owner pastes it into the
-Firebase Console, publishes, and checks it in the Rules Playground (a recent order must still be
-denied, a year-old Delivered one allowed). Not before — for the year in between, the exception
-would only be a way to lose orders.
+**First, nobody could delete an order** — the `$oid` `.write` required `newData.exists()` for
+everyone. Published and verified the same day: a Rules Playground `set` of `null` at
+`orders/testuser/testorder`, as the main admin, returned *Simulated write denied*. That followed
+real, paid, delivered orders from the gateway-testing period going missing from the admin, and the
+removal of Go Live — Clear Test Orders and Delete This Order.
 
-**Published and verified the same day.** Firebase Console → Rules Playground: a `set` of `null` at
-`orders/testuser/testorder`, authenticated as the main admin UID, returned *Simulated write denied*.
+**Then the narrow exception behind Clean Up Old Orders.** The owner chose to publish it now rather
+than wait for the first orders to turn a year old. The rule allows a delete only when **all** of
+these hold: the main admin or a co-admin with the orders permission; status **Delivered** or
+**Cancelled**; `paymentDeadline` a number **more than 365 days** in the past; and no refund still
+owed (`refund/due` not true, or `refund/status` is `refunded`). `paymentDeadline` is now pinned like
+`placedAt`, so a customer cannot backdate it. A customer can still never delete anything. The
+button's own filter (`orderCleanupEligible` in `app.jsx`) is stricter still — it also skips open
+returns and DOA claims, and requires `placedAt` to be old — and it downloads the backup first.
 
-**What the answer should be:** in the Rules tab, the `"$oid"` block's `.write` begins with
-`auth != null && newData.exists() &&`. Placing an order, paying, and moving an order through
-Confirmed → Shipped → Delivered all keep working, because each of those writes data rather than
-removing it.
+**To do:** Firebase Console → Realtime Database → **Rules** → paste the whole of
+`database.rules.json` → **Publish**. Then in the **Rules playground**, authenticated as the main
+admin UID, simulate a `set` of `null` at `orders/testuser/testorder`. It must still say
+*Simulated write denied* — that order does not exist, so it is neither Delivered nor a year old.
 
-**If it is wrong:** an order that should not count is **Cancelled**, never deleted — cancelling
-writes a status, so the rule allows it. If a future feature genuinely needs to remove an order, the
-test `the database rules refuse to delete an order` in `test/admin-panel-layout.test.mjs` will fail
-first; that is the point at which to decide, not after.
+**What the answer should be:** placing an order, paying, and moving an order through
+Confirmed → Shipped → Delivered all keep working; Delete This Order and Go Live stay gone; nothing
+qualifies for Clean Up Old Orders until about September 2027.
+
+**If it is wrong:** the test `the database rules delete only a finished, year-old order, and only
+for an admin` in `test/admin-panel-layout.test.mjs` evaluates the rule against real cases — recent,
+unfinished, refund owed, customer, co-admin — and fails if a later edit widens it.
 
 ---
 
