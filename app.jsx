@@ -10887,10 +10887,21 @@ function DetailPage({product:p,products=[],mediaCache={},media={images:[],video:
    clear of the gesture bar; without both, the bottom of the iframe rendered underneath the
    system UI and its last centimetre was simply not on screen.
 
-   Printing is the one thing that stays missing: a plain WebView has no print support, so the
-   document's own "Print / Save PDF" button would do nothing and is hidden here. That needs
-   Android's PrintManager wired into MainActivity, which is an app build, not a deploy. Share
-   covers the gap in the meantime — see invoiceShareText. */
+   Printing and PDF both need the app: a plain WebView can neither print nor produce a file, so
+   the document's own "Print / Save PDF" button would do nothing and stays hidden here. The two
+   header buttons below are wired to MainActivity's bridge instead, and each appears only when
+   the bridge actually offers its method — so a build without them shows nothing dead:
+
+     NemoAndroid.printDocument(html, jobName)  → PrintManager. Its dialog always lists
+                                                "Save as PDF", so printing and saving are one
+                                                method, never two.
+     NemoAndroid.sharePdf(html, jobName)       → render to a PDF in cacheDir and hand it out
+                                                through a FileProvider, as a real attachment.
+
+   Both are given the document's ORIGINAL html rather than the fitted copy below: each generated
+   document already carries an @media print block that hides .np and undoes the fit transform,
+   so what prints is the clean A4 sheet and not the phone-shaped one. Until a build ships those
+   methods, Share still falls back to the itemised text — see invoiceShareText. */
 const DOC_FIT_CSS=`<style>
   html{-webkit-text-size-adjust:100%}
   body{padding-bottom:40px}
@@ -10907,9 +10918,27 @@ function DocViewer({doc,onClose,showToast}){
   const html=src.replace("</head>",DOC_FIT_CSS+"</head>");
   const share=doc.share;
 
-  /* The share sheet inside the app is MainActivity's, reached through navigator.share. When
-     there is none, the text goes to the clipboard so it can be pasted anywhere. */
+  /* Asked for per method, not per build number: an older app that predates either one simply
+     does not advertise it, and the button it drives is left off the header. */
+  const bridge=(typeof window!=="undefined"&&window.NemoAndroid)||null;
+  const canPrint=!!(bridge&&typeof bridge.printDocument==="function");
+  const canSharePdf=!!(bridge&&typeof bridge.sharePdf==="function");
+  /* Becomes a print job name and a PDF filename, so it has to survive being both. */
+  const jobName=(title.replace(/[^\w\s-]+/g," ").replace(/\s+/g," ").trim())||"Document";
+
+  const doPrint=()=>{
+    try{ bridge.printDocument(src, jobName); }
+    catch(e){ console.warn("printDocument failed",e&&e.message); showToast&&showToast("Couldn't open the print dialog","error"); }
+  };
+
+  /* A PDF of the document itself is what people actually want to send — the itemised text was
+     only ever a stand-in for a file a WebView could not produce. Prefer the file; keep the text
+     for builds without the bridge, and for the clipboard when there is no share sheet at all. */
   const doShare=async()=>{
+    if(canSharePdf){
+      try{ bridge.sharePdf(src, jobName); return; }
+      catch(e){ console.warn("sharePdf failed",e&&e.message); }
+    }
     if(!share) return;
     try{
       if(navigator.share){ await navigator.share({title:share.title, text:share.text}); return; }
@@ -10925,7 +10954,8 @@ function DocViewer({doc,onClose,showToast}){
         <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexShrink:0}}>
           <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:16,fontWeight:800,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-            {share&&<button className="press" onClick={doShare} style={btn}>Share</button>}
+            {canPrint&&<button className="press" onClick={doPrint} style={btn}>Print</button>}
+            {(share||canSharePdf)&&<button className="press" onClick={doShare} style={btn}>Share</button>}
             <button className="press" onClick={onClose} aria-label="Close"
               style={{...btn,borderRadius:"50%",width:34,height:34,padding:0,fontSize:18}}>×</button>
           </div>

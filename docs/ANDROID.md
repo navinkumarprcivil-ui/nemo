@@ -277,40 +277,69 @@ What is actually true of each half:
 header, the bottom nav, the floating cart bar and every bottom sheet. Checked on an Android 15
 phone against version code 14 — header and camera cutout, bottom nav against the gesture pill,
 the floating cart bar, a bottom sheet, and landscape: nothing clipped, nothing hidden. Play
-cannot see any of that. It scans the bundle for `enableEdgeToEdge()` and native inset handling,
-finds a WebView wrapper that calls neither, and flags it. So this flag is cosmetic in the
-console and will keep returning until `MainActivity` calls
-`enableEdgeToEdge()` (androidx.activity) in `onCreate`. Two lines, version 15, and it silences a
-warning rather than fixing a defect.
+cannot see any of that.
 
-**The deprecated-API half is in a library, not in this app.** Play names
-`android.view.Window.setStatusBarColor` and `setNavigationBarColor` starting in `wk.a`, `xk.a`
-and `yk.a`. Those are R8-obfuscated names, and R8 never renames `MainActivity` — it is
-referenced by name in the manifest, so it is kept. Three obfuscated classes therefore mean
-three library call sites, and nothing in this app's own source to migrate.
+**And the second wrong note: `enableEdgeToEdge()` is already there.** This section used to say
+the flag would keep returning until `MainActivity` called it. It has called it since before
+release 14 — `MainActivity.kt:120`, imported at line 24 — so release 14 both calls it and is
+flagged for it. Adding the call is not the fix either, because there is nothing to add.
 
-Before spending any time on it, find out which library. The release build writes
-`app/build/outputs/mapping/release/mapping.txt`; the entries map original names to obfuscated
-ones, so:
+**Both halves are one problem, and it is a pinned version.** `mapping.txt` for release 14:
 
 ```
-grep -E '\-> (wk|xk|yk)\.a:' app/build/outputs/mapping/release/mapping.txt
+androidx.activity.EdgeToEdgeApi23 -> wk:
+androidx.activity.EdgeToEdgeApi26 -> xk:
+androidx.activity.EdgeToEdgeApi29 -> yk:
 ```
 
-names them. If they are Material or Firebase internals the flag is theirs to fix and the only
-move is a later BOM, or living with it.
+`wk`, `xk` and `yk` — the three classes Play names for the deprecated
+`setStatusBarColor`/`setNavigationBarColor` calls — are **androidx.activity's own implementation
+of `enableEdgeToEdge()`**. The deprecated calls are made by the library, on this app's behalf,
+every time that one line runs. And `gradle/libs.versions.toml` pins
+`activityKtx = "1.8.0"`, which is years old; the newer releases reworked exactly this code.
+
+So the only lever for either flag is that version. The theme is not at fault and was checked:
+`Theme.Material3.DayNight.NoActionBar` with no `statusBarColor`, no `navigationBarColor` and no
+`windowOptOutEdgeToEdgeEnforcement`. `targetSdk` is 36.
+
+Which is also why *may not display for all users* survives a build that does call
+`enableEdgeToEdge()`: Play's static check does not recognise what 1.8.0 emits.
+
+Pick the current stable androidx.activity at build time rather than a number written down here,
+and — the rule this section exists to enforce — **the bump is a hypothesis until release 15
+comes back clean.** A dependency bump made on a guess is how the wrong conclusion got into this
+file twice.
+
+How to redo the lookup on a later release, with the pattern that actually works — Play writes
+`class.method`, so `wk.a` is method `a` of class `wk`, and grepping for a class *named* `wk.a`
+finds nothing and looks like a clean bill of health:
+
+```
+grep -E ' -> (wk|xk|yk):$' app/build/outputs/mapping/release/mapping.txt
+```
 
 ### One more flag on 14: bitmap decoding
 
 *Improve your app's performance with bitmap image optimisation* — a manual
 `BitmapFactory.decodeStream` in `al0.G`, fed by `HttpURLConnection.getInputStream` in `ag0.O`.
 
-Obfuscated again, so the same `mapping.txt` lookup applies, and the same reasoning: this app
-loads no bitmaps of its own. A WebView decodes images in native code and never touches
-`BitmapFactory`. The pattern Play describes — open an `HttpURLConnection`, decode the stream to a
-`Bitmap` — is what a notification library does when it fetches an image for a large icon, which
-points at Firebase Messaging rather than at anything written here. Confirm with the mapping file
-before acting; an image-loading library cannot be added to code this project does not own.
+The mapping file settles this one too, and the answer is stranger than a library name:
+
+```
+_COROUTINE._BOUNDARY            -> al0:
+kotlin.jvm.internal.TypeIntrinsics -> ag0:
+```
+
+Neither is a class that decodes anything. `_COROUTINE._BOUNDARY` is a synthetic marker Kotlin
+inserts so a coroutine's stack trace can be reassembled across a suspension point, and
+`TypeIntrinsics` is runtime plumbing for cast checks. Play is reporting **coroutine boundary
+frames**, which is what a stack looks like when the decode happens inside somebody's `suspend`
+function. So the call is real but the class names lead nowhere, and there is no file in this
+project to open.
+
+That matches the rest of the evidence: this app loads no bitmaps of its own, and a WebView
+decodes images in native code without touching `BitmapFactory`. Leave it. An image-loading
+library cannot be added to code this project does not own.
 
 ### Printing is not wired up, and that is the next app change
 
@@ -366,7 +395,36 @@ fun printDocument(html: String, jobName: String) = runOnUiThread {
 }
 ```
 
-Then `DocViewer` gains a Print button beside Share, guarded on the bridge method being there.
+**Sharing has to hand over the same PDF.** Asked for directly: the Share button should send the
+document, not a description of it. Text was never the intent — it was the only thing a WebView
+could produce. That needs a second method, because `PrintManager` hands its output to the print
+spooler and gives the app no file:
+
+```kotlin
+@JavascriptInterface
+fun sharePdf(html: String, jobName: String)   // render → PDF in cacheDir → FileProvider → ACTION_SEND
+```
+
+Same off-screen `WebView` and the same `createPrintDocumentAdapter()`, but driven by hand rather
+than handed to `PrintManager`: `onLayout(...)`, then `onWrite(...)` against a
+`ParcelFileDescriptor` opened on a file in `cacheDir`. Then `FileProvider.getUriForFile(...)` and
+an `ACTION_SEND` of type `application/pdf` with `FLAG_GRANT_READ_URI_PERMISSION`. That needs a
+`<provider android:name="androidx.core.content.FileProvider">` in the manifest and a
+`res/xml/file_paths.xml` with a `<cache-path>` entry — without the grant flag the receiving app
+gets a `SecurityException` and the share silently does nothing.
+
+**The web half is already deployed and waiting.** `DocViewer` asks the bridge per method, not per
+version, and renders each button only if its method is there — so nothing dead appears on a phone
+still running 14, and both buttons light up the moment the build ships:
+
+| Bridge method | Button |
+|---|---|
+| `NemoAndroid.printDocument(html, jobName)` | **Print** — the dialog's own destination list carries *Save as PDF* |
+| `NemoAndroid.sharePdf(html, jobName)` | **Share** — prefers the file, falls back to today's text |
+
+Both are handed the document's original HTML, not the phone-fitted copy `DocViewer` displays, so
+the `@media print` block applies and the output is the A4 sheet with its controls hidden. The
+credit note, which passes no share text at all, gains a working Share button for the first time.
 
 ## What version code 15 should carry
 
@@ -377,30 +435,32 @@ reason for the release.
 
 1. **`PrintManager`, with Save as PDF.** The actual feature — see *Printing is not wired up*
    above for the three things that decide whether it works. This is what version 15 is for.
-2. **`enableEdgeToEdge()` in `MainActivity.onCreate`.** Needs `androidx.activity` 1.8.0 or
-   later, and clears *Edge-to-edge may not display for all users*. **Test it below Android 15
-   before shipping.** On Android 15 the app is already edge-to-edge because `targetSdk` 35 forces
-   it, which is why the on-device check passed; on Android 14 and earlier this call is a real
-   behaviour change — the system bars go transparent and the WebView starts drawing behind them.
-   The web side already spends `env(safe-area-inset-*)`, so it should hold, but "should" is not a
-   test: check the header under the status bar and the bottom nav against the navigation bar on
-   an Android 13 or 14 device or emulator.
-3. **A monochrome notification icon.** `ic_launcher` is what ships today and Android flattens it
+2. **Share the PDF, not the bill as text.** `sharePdf` in the bridge — see *Printing is not
+   wired up* for the FileProvider it needs. The web half is deployed; this is what switches it on.
+3. **Bump `activityKtx` from `1.8.0`.** This is the whole of the edge-to-edge work — the call is
+   already in `MainActivity`, and `mapping.txt` shows 1.8.0's own `EdgeToEdgeApi23/26/29` making
+   the deprecated calls Play flags. Take the current stable, not a number from this file. It is
+   the only lever on both edge-to-edge actions, and it is unproven until 15 comes back clean.
+   **Check the bars below Android 15 anyway.** Not because of the call — that has shipped and been
+   seen working — but because a version jump this wide can move inset behaviour on older
+   releases. The on-device check was Android 15, where `targetSdk` 36 forces edge-to-edge
+   regardless; look at the header under the status bar and the bottom nav against the navigation
+   bar on an Android 13 or 14 device or emulator.
+4. **A monochrome notification icon.** `ic_launcher` is what ships today and Android flattens it
    to a white silhouette.
-4. **Drop `android:usesCleartextTraffic="true"`.** The app only ever loads
+5. **Drop `android:usesCleartextTraffic="true"`.** The app only ever loads
    `https://www.nemoaquastore.in`. It was left in during the qualifying run because a
    third-party subresource over http would fail silently, and only in release — so exercise
    payments, sign-in and sharing on the release build after removing it.
 
-**The other two flags are not actionable and should not be chased.** The deprecated
-`setStatusBarColor`/`setNavigationBarColor` calls and the manual `BitmapFactory` decode both sit
-in obfuscated classes, meaning library code — this app has no source that does either. Confirm
-with the `mapping.txt` lookup recorded above, then leave them. They carry no deadline, and a
-Material bump already failed to move the first one once. Razorpay's checkout SDK and Play
-services' credential flow are as likely a source as Material is; Firebase Messaging's
-notification-image fetch is the likely source of the bitmap one. None of that is fixable from
-here, and a dependency bump made on a guess is how the wrong conclusion got written into this
-file in the first place.
+**The bitmap flag is the one to leave alone.** `mapping.txt` resolves the two classes Play names
+to `_COROUTINE._BOUNDARY` and `kotlin.jvm.internal.TypeIntrinsics` — Kotlin runtime artefacts,
+not code that decodes anything — so the report is naming coroutine stack frames inside a
+dependency. There is no file here to open and nothing to migrate. It carries no deadline.
+
+Also delete `app/src/main/java/in/nemoaquastore/app/MainActivity.kt.bak`. It does not compile
+and cannot affect the build, but it answers `grep` alongside the real file and has already
+cost one round of confusion.
 
 ## Still open
 
