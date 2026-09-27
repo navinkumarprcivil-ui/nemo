@@ -600,17 +600,12 @@ events that can change the answer. A reload asks; rotating asks; switching betwe
 stored. R8 keeps `@JavascriptInterface` methods by annotation, so the new method needed no keep
 rule.
 
-Kotlin measures on demand rather than reading a cached field, which closes the cold-start race:
-
-```kotlin
-@JavascriptInterface
-fun bottomInset(): Int {
-    val v = webViewOrNull() ?: return systemBottomInsetCssPx
-    val insets = ViewCompat.getRootWindowInsets(v) ?: return systemBottomInsetCssPx
-    return (insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom /
-        resources.displayMetrics.density).roundToInt().coerceAtLeast(0)
-}
-```
+**The injection stays.** Not as the mechanism, but as the other half of it. The two cover opposite
+cases: the pull handles a page that reloaded *after* the insets settled, and the push handles insets
+that arrive *after* the page loaded — a cold start, where the listener fires and the page has
+already finished asking. Neither is redundant and they cannot disagree, because both write the same
+property from the same field. `bottomInset()` simply returns `systemBottomInsetCssPx`, the value the
+listener already maintains.
 
 **What this leaves.** The page sits behind the navigation bar, as an edge-to-edge app should, and
 its own content clears it. No window background is exposed, so there is no slab and no white line.
