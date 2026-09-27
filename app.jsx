@@ -5231,20 +5231,6 @@ function generateInvoiceHTML(order, settings, opts){
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invoice ${invNo}</title>
 <style>
 *{box-sizing:border-box}
-/* The bottom safe area, from whichever source actually knows it.
-
-   In a browser it is the CSS environment variable: the page is laid out under the system bars and
-   the engine reports how far. Inside the Android app it is neither — MainActivity leaves the
-   WebView edge-to-edge on purpose so the store's own background runs behind the navigation bar,
-   and a WebView reports that variable as the padding it was given, which is correctly zero. The
-   page then has no way to learn the bar's height, and every bottom-anchored thing sits under the
-   buttons.
-
-   So the app hands the number in: one setProperty on documentElement per inset change, read here.
-   max() rather than a swap because only one of the two is ever non-zero, and a custom property
-   survives React re-renders in a way inline styles set from outside do not — which is what sank
-   the ten generations of injected layout fixes described in docs/ANDROID.md. */
-:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;background:#e9edf3;margin:0;padding:20px;color:#1f2733}
 .page{max-width:780px;margin:0 auto;background:#fff;padding:42px 44px 36px;box-shadow:0 8px 32px rgba(31,56,100,.14)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
@@ -5847,6 +5833,22 @@ const STYLES = `
 html,body,#root{height:100%;}
 body,#root{background:#ffffff;color:#0f172a;}
 *{-webkit-tap-highlight-color:transparent;}
+/* The bottom safe area, from whichever source actually knows it.
+
+   In a browser and in the installed PWA this is the CSS environment variable: the page is laid
+   out under the system bars and the engine reports how far. Inside the Android app it is zero,
+   and correctly so — MainActivity pads the WebView by the navigation bar's height and paints
+   that strip white, so the page is not under anything. --nemo-nav-inset is how an app could
+   hand a value in instead; no build does today, and the 0px fallback is what makes that safe.
+
+   This has to live in THIS stylesheet. It was written into the invoice document's <style> by
+   mistake in c240efb, where nothing reads it, and for one release every rule below referenced a
+   property that did not exist. An undefined custom property does not fall back to nothing — it
+   invalidates the entire declaration. The bottom offset became auto, so the floating cart bar
+   dropped to its static position at the top of the screen; the mini-cart's padding shorthand was
+   thrown away whole, so its Subtotal row ran off both edges. One missing line, eighteen broken
+   rules, and no error anywhere. */
+:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 button,a,label,.press,.lift{touch-action:manipulation;}
 /* The shell is exactly one viewport tall and the bottom nav is pinned to its
    bottom edge, so this height has to be the height you can actually see. 100vh

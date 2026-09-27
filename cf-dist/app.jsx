@@ -1063,11 +1063,16 @@ function nextDiscountNudge(cartTotal, settings, orders){
   const offOf=(c)=>c.type==="percent"
     ? `${c.value}% off${c.maxDiscount>0?` (up to ₹${c.maxDiscount})`:""}`
     : `₹${c.value} off`;
+  /* The same offer, without the cap. The floating pill is one line on a phone and the cap
+     pushes it to two, which is a lot of screen to spend on a caveat nobody can act on yet —
+     the number they need is how much more to add. The cart says it in full, directly above
+     the checkout button, which is where the cap actually changes a decision. */
+  const offShortOf=(c)=>c.type==="percent" ? `${c.value}% off` : `₹${c.value} off`;
   // Nearest threshold still ahead; failing that, the best one already cleared.
   const ahead=usable.filter(c=>t<c.minOrder).sort((a,b)=>a.minOrder-b.minOrder)[0];
-  if(ahead) return { need:Math.max(0,Math.ceil(ahead.minOrder-t)), off:offOf(ahead), code:ahead.code, minOrder:ahead.minOrder, unlocked:false };
+  if(ahead) return { need:Math.max(0,Math.ceil(ahead.minOrder-t)), off:offOf(ahead), offShort:offShortOf(ahead), code:ahead.code, minOrder:ahead.minOrder, unlocked:false };
   const won=usable.sort((a,b)=>b.minOrder-a.minOrder)[0];
-  return won ? { need:0, off:offOf(won), code:won.code, minOrder:won.minOrder, unlocked:true } : null;
+  return won ? { need:0, off:offOf(won), offShort:offShortOf(won), code:won.code, minOrder:won.minOrder, unlocked:true } : null;
 }
 
 
@@ -5227,20 +5232,6 @@ function generateInvoiceHTML(order, settings, opts){
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invoice ${invNo}</title>
 <style>
 *{box-sizing:border-box}
-/* The bottom safe area, from whichever source actually knows it.
-
-   In a browser it is the CSS environment variable: the page is laid out under the system bars and
-   the engine reports how far. Inside the Android app it is neither — MainActivity leaves the
-   WebView edge-to-edge on purpose so the store's own background runs behind the navigation bar,
-   and a WebView reports that variable as the padding it was given, which is correctly zero. The
-   page then has no way to learn the bar's height, and every bottom-anchored thing sits under the
-   buttons.
-
-   So the app hands the number in: one setProperty on documentElement per inset change, read here.
-   max() rather than a swap because only one of the two is ever non-zero, and a custom property
-   survives React re-renders in a way inline styles set from outside do not — which is what sank
-   the ten generations of injected layout fixes described in docs/ANDROID.md. */
-:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;background:#e9edf3;margin:0;padding:20px;color:#1f2733}
 .page{max-width:780px;margin:0 auto;background:#fff;padding:42px 44px 36px;box-shadow:0 8px 32px rgba(31,56,100,.14)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
@@ -5846,6 +5837,22 @@ body,#root{background:#ffffff;color:#0f172a;}
 .nemo-app,.nemo-app *{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important;}
 .nemo-app input,.nemo-app textarea,.nemo-app select,.nemo-app [contenteditable="true"],.nemo-app [data-allow-select="true"]{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important;}
 .nemo-native-android .mobile-bottom-nav{bottom:0!important;}
+/* The bottom safe area, from whichever source actually knows it.
+
+   In a browser and in the installed PWA this is the CSS environment variable: the page is laid
+   out under the system bars and the engine reports how far. Inside the Android app it is zero,
+   and correctly so — MainActivity pads the WebView by the navigation bar's height and paints
+   that strip white, so the page is not under anything. --nemo-nav-inset is how an app could
+   hand a value in instead; no build does today, and the 0px fallback is what makes that safe.
+
+   This has to live in THIS stylesheet. It was written into the invoice document's <style> by
+   mistake in c240efb, where nothing reads it, and for one release every rule below referenced a
+   property that did not exist. An undefined custom property does not fall back to nothing — it
+   invalidates the entire declaration. The bottom offset became auto, so the floating cart bar
+   dropped to its static position at the top of the screen; the mini-cart's padding shorthand was
+   thrown away whole, so its Subtotal row ran off both edges. One missing line, eighteen broken
+   rules, and no error anywhere. */
+:root{--safe-b:max(env(safe-area-inset-bottom, 0px), var(--nemo-nav-inset, 0px));}
 button,a,label,.press,.lift{touch-action:manipulation;}
 /* The shell is exactly one viewport tall and the bottom nav is pinned to its
    bottom edge, so this height has to be the height you can actually see. 100vh
@@ -8408,7 +8415,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.8f32c55a";
+const APP_BUILD = "v90.966d2ae2";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -15617,7 +15624,7 @@ function NemoStore(){
             style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:"calc(76px + var(--safe-b))",zIndex:90,width:"calc(100% - 28px)",maxWidth:440,background:"#0f172a",color:"white",border:"none",borderRadius:99,padding:"7px 8px 7px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,boxShadow:"0 14px 34px rgba(15,23,42,.35)",fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:"pointer"}}>
             <span style={{fontSize:12,fontWeight:700,textAlign:"left",lineHeight:1.3,minWidth:0,flex:1,overflow:"visible",textOverflow:"clip",whiteSpace:"normal"}}>
               {showFree?<>🚚 Add <b style={{color:"#fda4af"}}>₹{left}</b> more for free delivery</>
-               :dc?<>🏷️ Add <b style={{color:"#fda4af"}}>₹{dc.need}</b> more to get <b>{dc.off}</b></>
+               :dc?<>🏷️ Add <b style={{color:"#fda4af"}}>₹{dc.need}</b> more to get <b>{dc.offShort}</b></>
                :thr>0&&cartTotal>=thr?<>🎉 Free delivery unlocked!</>
                :<>🛒 {cartCount} item{cartCount!==1?"s":""} in your cart</>}
             </span>

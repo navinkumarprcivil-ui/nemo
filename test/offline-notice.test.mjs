@@ -23,6 +23,17 @@ function offlineBarSource() {
   return app.slice(start, end);
 }
 
+/* The app's own stylesheet, which is the only one whose rules read --safe-b. Slicing it out
+   keeps these assertions from being satisfied by an identical line in one of the generated
+   documents (the invoice, the bill) that carry their own <style>. */
+function stylesBlock(){
+  const at = app.indexOf('const STYLES = `');
+  assert.ok(at > -1, 'STYLES not found');
+  const end = app.indexOf('`;', at + 16);
+  assert.ok(end > at, 'STYLES end not found');
+  return app.slice(at, end);
+}
+
 test('the offline notice renders through the pill class, not inline top positioning', () => {
   const src = offlineBarSource();
   assert.match(src, /className="offline-pill"/);
@@ -56,7 +67,20 @@ test('the pill is anchored to the bottom and clears the nav, the cart bar and th
    env() call anywhere else is the bug: it works in a browser and silently sits under the
    navigation buttons in the installed app. */
 test('every bottom-anchored rule reads --safe-b, not the raw environment variable', () => {
-  assert.match(app, /:root\{--safe-b:max\(env\(safe-area-inset-bottom, 0px\), var\(--nemo-nav-inset, 0px\)\);\}/);
+  /* Inside STYLES, not merely somewhere in the file. This assertion used to search the whole
+     source, so it went on passing when c240efb put the definition in the invoice document's
+     own <style> — a separate page that reads it nowhere. Every rule here then referenced an
+     undefined property, and an undefined custom property invalidates the whole declaration
+     rather than falling back: the floating cart bar lost its bottom offset and drew at the top
+     of the screen, and the mini-cart's padding shorthand collapsed to zero on all four sides.
+     Nothing errored, no test failed, and it shipped. */
+  const styles = stylesBlock();
+  assert.match(styles, /:root\{--safe-b:max\(env\(safe-area-inset-bottom, 0px\), var\(--nemo-nav-inset, 0px\)\);\}/);
+  // And it must come before the first rule that reads it, or the cascade never sees a value.
+  assert.ok(styles.indexOf('--safe-b:max(') < styles.indexOf('var(--safe-b)'),
+    'the definition must precede its first use inside STYLES');
+  // Defined once, in one place.
+  assert.equal((app.match(/--safe-b:max\(/g) || []).length, 1);
   // Exactly one raw call survives, inside that definition.
   const raw = app.match(/env\(safe-area-inset-bottom[^)]*\)/g) || [];
   assert.equal(raw.length, 1, 'raw bottom env() calls outside the :root definition: ' + (raw.length - 1));
