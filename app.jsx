@@ -6110,6 +6110,12 @@ body:has(.floating-cart-bar) .offline-pill{bottom:calc(var(--safe-b) + 134px);}
   .home-hero .hero-tagline{font-size:clamp(22px,3.4vw,34px) !important;margin-bottom:8px !important;}
   .sheet-panel{max-height:96vh !important;}
   .mobile-bottom-nav{padding-top:4px !important;padding-bottom:calc(var(--safe-b) + 4px) !important;}
+  /* Two sticky bars do not fit on a screen this short. Sideways at 873px wide the tablet
+     layout applies, so .desk-nav pins itself at the top AND .shop-bar pins under it at
+     top:0 — together about 230px of a 390px viewport, leaving less room for products than
+     for chrome. The top bar is the one worth keeping, because it is how you leave the page;
+     search and the category pills scroll away and come straight back on a scroll up. */
+  .shop-bar{position:static !important;}
 }
 /* Landscape notches/rounded corners live on the left and right edges. */
 @media(orientation:landscape){
