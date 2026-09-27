@@ -42,9 +42,18 @@ review naming an old phone is the signal to start building 17 rather than to wai
 
 `database.rules.json` changed on 27 September 2026: the write rule on `orders/$uid/$oid` now starts
 `auth != null && newData.exists() &&`, so **nobody can delete an order — not a customer, not the
-admin, not a co-admin**. The same day the three admin controls that deleted orders were removed
-(Go Live — Clear Test Orders, Clean Up Old Orders, Delete This Order), after real, paid, delivered
-orders from the gateway-testing period went missing from the admin.
+admin, not a co-admin**. The same day Go Live — Clear Test Orders and Delete This Order were removed from
+the admin, after real, paid, delivered orders from the gateway-testing period went missing from it.
+Clean Up Old Orders came back at the owner's request, narrowed: finished orders only, a year old at
+least, nothing open on them, backup downloaded first (`orderCleanupEligible` in `app.jsx`).
+
+**Open decision, due by about September 2027.** Under these rules the database refuses the cleanup's
+deletes too, and the button reports them as "refused by the database and kept". No order can
+qualify until one is a year old, so nothing is lost by leaving this until then. At that point the
+choice is either to keep the rules as they are and never clear orders, or to change the `$oid`
+`.write` rule so an admin may delete an order only when it is Delivered or Cancelled and its
+`paymentDeadline` is more than a year old. The owner makes that rules edit in the Firebase Console;
+it was not made from the repo.
 
 **The repo copy does nothing until it is published.** Firebase Console → Realtime Database →
 **Rules** → paste the whole file → **Publish**.

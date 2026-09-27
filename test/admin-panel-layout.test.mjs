@@ -55,23 +55,67 @@ test('live-fish packing settings are hidden while live fish are off', () => {
   assert.ok(app.includes('liveFishRestrictNCIndia'), 'the live-fish settings were deleted rather than hidden');
 });
 
-/* No order can be deleted — not by a button, not by the server, not by the database.
-
-   Real, paid, delivered orders placed while the payment gateway was being tested were lost
-   from the admin. Three admin controls could delete orders: "Go Live — Clear Test Orders"
-   (every order, any status, with no memory of having run), "Clean Up Old Orders" (delivered
-   and cancelled orders past an age) and "Delete This Order" on every order. All three are
-   gone, and the database rules now refuse a delete from anyone, admin included, so a
-   control that comes back later still cannot remove an order. Orders are GST records: an
-   order that should not count is Cancelled, never deleted. */
-test('nothing in the app deletes an order', () => {
+/* Orders are GST records, and real, paid, delivered orders from the gateway-testing period were
+   lost from the admin. Three admin controls could delete orders: "Go Live — Clear Test Orders"
+   (every order, any status), "Delete This Order" (on every order) and "Clean Up Old Orders"
+   (delivered and cancelled orders from three months old). The first two are gone for good.
+   Clean Up Old Orders came back at the owner's request, narrowed: a year is the floor, only
+   finished orders with nothing open on them qualify, and the backup of exactly those orders
+   must be downloaded before the delete button lights up. */
+test('the only code that deletes an order is the narrowed cleanup', () => {
   for (const gone of ['resetAllOrderData', 'DELETE ALL ORDERS', 'Clear Test Orders',
-    'Clean Up Old Orders', 'Delete This Order', 'deleteOrderHandler', 'onDeleteOrder', 'onCleanupOrders']){
+    'Delete This Order', 'deleteOrderHandler', 'onDeleteOrder']){
     assert.ok(!app.includes(gone), `"${gone}" is back in app.jsx`);
   }
-  // Any ref into orders/ that is removed or overwritten with null.
-  assert.doesNotMatch(app, /ref\(\s*["'`]orders[^)]*\)\s*\.\s*(remove\(|set\(\s*null)/, 'app.jsx removes an order');
+  const removes = [...app.matchAll(/ref\(\s*["'`]orders[^)]*\)\s*\.\s*(remove\(|set\(\s*null)/g)];
+  assert.equal(removes.length, 1, `expected exactly one order delete in app.jsx, found ${removes.length}`);
+  const start = app.indexOf('const cleanupOldOrders=async days=>{');
+  assert.ok(start > 0, 'cleanupOldOrders is missing');
+  const body = app.slice(start, app.indexOf('\n  };', start));
+  assert.ok(body.includes('.remove()'), 'the one order delete is not inside cleanupOldOrders');
+  assert.match(body, /orders\.filter\(x=>orderCleanupEligible\(x,days\)\)/, 'cleanupOldOrders deletes without the eligibility filter');
   assert.doesNotMatch(app, /ref\("orderSeq\/"\+[^)]*\)\.remove\(\)/, 'something removes order-number counters');
+});
+
+test('only finished orders over a year old, with nothing open, can be cleaned up', () => {
+  const grab = (name) => {
+    const i = app.indexOf('function ' + name + '(');
+    assert.ok(i >= 0, name + ' is missing');
+    return app.slice(i, app.indexOf('\n}\n', i) + 2);
+  };
+  const floor = app.match(/const ORDER_CLEANUP_MIN_DAYS = (\d+);/);
+  assert.ok(floor && Number(floor[1]) >= 365, 'the cleanup floor is under a year');
+  const eligible = new Function(
+    `const ORDER_CLEANUP_MIN_DAYS=${floor[1]};${grab('adminOrderNeedsAttention')}${grab('orderCleanupEligible')}return orderCleanupEligible;`)();
+  const now = Date.parse('2030-01-01T00:00:00Z'), DAY = 86400000;
+  const order = (ageDays, extra = {}) => ({ id: 'o1', userUid: 'u1', status: 'Delivered',
+    placedAt: new Date(now - ageDays * DAY).toISOString(), paymentDeadline: now - ageDays * DAY + 1200000, ...extra });
+
+  assert.equal(eligible(order(400), 365, now), true, 'a delivered order 400 days old should qualify');
+  assert.equal(eligible(order(400, { status: 'Cancelled' }), 365, now), true);
+  assert.equal(eligible(order(300), 365, now), false, 'under a year old');
+  assert.equal(eligible(order(300), 30, now), false, 'a shorter age must not get under the one-year floor');
+  assert.equal(eligible(order(800), 730, now), true);
+  assert.equal(eligible(order(500), 730, now), false, 'the picker can only make it stricter');
+  for (const status of ['Awaiting Payment', 'Payment Review', 'Confirmed', 'Shipped']){
+    assert.equal(eligible(order(900, { status }), 365, now), false, `${status} is not finished`);
+  }
+  assert.equal(eligible(order(900, { returnReq: { status: 'Pending' } }), 365, now), false, 'open return');
+  assert.equal(eligible(order(900, { doa: { status: 'Pending' } }), 365, now), false, 'open DOA claim');
+  assert.equal(eligible(order(900, { refund: { due: true, status: 'processing' } }), 365, now), false, 'refund owed');
+  assert.equal(eligible(order(900, { paymentDeadline: undefined }), 365, now), false, 'no numeric date to check');
+  assert.equal(eligible(order(900, { paymentDeadline: now }), 365, now), false, 'both dates must be old');
+});
+
+test('the cleanup panel offers nothing under a year and demands the backup first', () => {
+  const i = app.indexOf('Clean Up Old Orders</span>');
+  assert.ok(i > 0, 'the panel is missing');
+  const panel = app.slice(app.lastIndexOf('{(()=>{', i), app.indexOf('})()}', i));
+  const years = [...panel.matchAll(/<option value=\{(\d+)\}>/g)].map(m => Number(m[1]));
+  assert.ok(years.length && years.every(y => y >= 1), `picker offers ${years}`);
+  assert.match(panel, /orderCleanupEligible\(o,cleanYears\*365\)/, 'the panel counts orders by some other rule');
+  assert.match(panel, /disabled=\{!cleanBackedUp\|\|cleanBusy\}/, 'the delete button does not wait for the backup');
+  assert.match(panel, /exportOrdersCSV\(due,/, 'the backup is not of exactly the orders being deleted');
 });
 
 test('the server never deletes an order', () => {

@@ -257,6 +257,25 @@ function adminOrderNeedsAttention(o){
   const doaOpen=!!o.doa&&!doa.startsWith("Approved")&&doa!=="Declined";
   return returnOpen||doaOpen;
 }
+/* Which orders "Clean Up Old Orders" may delete. Orders are GST records, so this is narrow on
+   purpose: finished (Delivered or Cancelled), nothing still open on it (a return, a DOA claim,
+   a refund owed), and at least a year old however the admin sets the picker.
+
+   Age is read from paymentDeadline as well as placedAt because the database rules can only
+   compare numbers: placedAt is an ISO string, while paymentDeadline is a millisecond time set
+   once at placement (20 minutes after it) and pinned by the rules. Requiring both keeps this
+   filter at least as strict as the rule, so the button never offers an order the database
+   would refuse. An order without a paymentDeadline predates it and is simply kept. */
+const ORDER_CLEANUP_MIN_DAYS = 365;
+function orderCleanupEligible(o, days, now=Date.now()){
+  if(!o||!o.id||!o.userUid) return false;
+  if(o.status!=="Delivered"&&o.status!=="Cancelled") return false;
+  if(adminOrderNeedsAttention(o)) return false;
+  if(o.refund&&o.refund.due&&o.refund.status!=="refunded") return false;
+  const cutoff=now-Math.max(ORDER_CLEANUP_MIN_DAYS,Number(days)||0)*86400000;
+  const placed=new Date(o.placedAt||0).getTime();
+  return typeof o.paymentDeadline==="number" && o.paymentDeadline<cutoff && placed>0 && placed<cutoff;
+}
 function adminOrderStage(o,now=Date.now()){
   if(adminOrderNeedsAttention(o)) return "Return/Replacement";
   if(orderIsPast(o,now)) return "Past Orders";
@@ -14915,7 +14934,7 @@ function AdminExitConfirm({onStay,onLeave}){
 }
 
 /* ═══════════════════ ADMIN HUB (Dashboard + Orders) ═══════════════════ */
-function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
+function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onCleanupOrders,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
   const [tab,setTab]=useState("orders"); // orders | products | reviews | requests | guides | settings | form | orderDetail
   const showcaseActionRef=useRef(new Set());
   const [showcaseAction,setShowcaseAction]=useState({});
@@ -14994,6 +15013,10 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
     };
     return ()=>{ backRef.current=null; };
   },[backRef,tab]);
+  const [cleanYears,setCleanYears]=useState(1);
+  const [cleanBackedUp,setCleanBackedUp]=useState(false);
+  const [cleanConfirm,setCleanConfirm]=useState(false);
+  const [cleanBusy,setCleanBusy]=useState(false);
   const [thumbBusy,setThumbBusy]=useState(false);
   const [thumbMsg,setThumbMsg]=useState("");
   const [visitStats,setVisitStats]=useState(null);
@@ -15479,6 +15502,65 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
               The orders sheet marks each row <b>Counts for GST</b>. Cancelled and unpaid orders are excluded from the tax columns, so the totals you file don't include them. Every sheet also carries full <b>ISO date</b> columns for reporting tools — the short dates on screen have no year.
             </div>
           </div>
+
+          {/* Clean up old orders. Brought back narrower than it was: a year is the floor, only
+              finished orders qualify (see orderCleanupEligible), the backup of exactly the orders
+              being deleted must be downloaded first, and the database rules refuse anything else. */}
+          {(()=>{
+            const due=orders.filter(o=>orderCleanupEligible(o,cleanYears*365));
+            const pick=v=>{ setCleanYears(v); setCleanBackedUp(false); setCleanConfirm(false); };
+            return(
+              <div style={{background:C.card,borderRadius:16,padding:"14px",marginBottom:14,border:`1px solid ${cleanConfirm?C.danger:C.border}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <span style={{fontSize:16}}>🧹</span>
+                  <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:800,color:C.text}}>Clean Up Old Orders</span>
+                </div>
+                <div style={{fontSize:11,color:C.textSub,marginBottom:8,lineHeight:1.5}}>
+                  Permanently deletes <b>finished</b> orders — Delivered or Cancelled — older than the age you pick, so the admin loads faster. Never touches an order under a year old, one still in progress, or one with an open return, claim or refund; the database refuses those even if asked.
+                </div>
+                <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",border:"1px solid #fde68a",borderRadius:12,padding:"9px 12px",marginBottom:10,lineHeight:1.5,fontWeight:600}}>
+                  GST law requires order records to be kept for 72 months from the annual-return due date. Once deleted here, the backup file below <b>is</b> that record — keep it in Google Drive.
+                </div>
+                <select value={cleanYears} onChange={e=>pick(Number(e.target.value))} disabled={cleanBusy}
+                  style={{width:"100%",borderRadius:12,border:`1.5px solid ${C.border}`,padding:"10px",fontSize:12,background:"white",fontFamily:"'Plus Jakarta Sans',sans-serif",color:C.text,marginBottom:10}}>
+                  <option value={1}>Older than 1 year</option>
+                  <option value={2}>Older than 2 years</option>
+                  <option value={3}>Older than 3 years</option>
+                </select>
+                {due.length===0
+                  ? <div style={{fontSize:12,fontWeight:700,color:C.success,padding:"4px 0"}}>✓ No finished orders that old — nothing to clear.</div>
+                  : (<>
+                  <button className="press" disabled={cleanBusy} onClick={()=>{ const k=exportOrdersCSV(due,"","",settings,walletBalances); stampExport(); setCleanBackedUp(true); showToast(`Backed up ${k} order${k!==1?"s":""} ✓`); }}
+                    style={{width:"100%",marginBottom:8,background:cleanBackedUp?"#fff":"#107c41",color:cleanBackedUp?"#107c41":"white",border:"1.5px solid #107c41",borderRadius:12,padding:"11px",fontSize:12,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
+                    {cleanBackedUp?"✓ Backup downloaded — download again":`⬇ 1. Download backup of these ${due.length} order${due.length!==1?"s":""}`}
+                  </button>
+                  {!cleanConfirm
+                    ? <button className="press" disabled={!cleanBackedUp||cleanBusy} onClick={()=>setCleanConfirm(true)}
+                        style={{width:"100%",background:cleanBackedUp?"#fff":"#f3f4f6",color:cleanBackedUp?C.danger:"#9ca3af",border:`1.5px solid ${cleanBackedUp?C.danger:C.border}`,borderRadius:12,padding:"11px",fontSize:12,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",cursor:cleanBackedUp?"pointer":"not-allowed"}}>
+                        🗑 2. Delete {due.length} old order{due.length!==1?"s":""}…
+                      </button>
+                    : (
+                    <div style={{background:"#fef2f2",border:`1.5px solid ${C.danger}`,borderRadius:12,padding:"12px"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.danger,marginBottom:10,lineHeight:1.5}}>Delete {due.length} finished order{due.length!==1?"s":""} older than {cleanYears} year{cleanYears!==1?"s":""}? This cannot be undone — the backup file is the only copy afterwards.</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        <button className="press" disabled={cleanBusy} onClick={()=>setCleanConfirm(false)}
+                          style={{background:"white",color:C.text,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>Cancel</button>
+                        <button className="press" disabled={cleanBusy} onClick={async()=>{
+                          setCleanBusy(true);
+                          const r=await onCleanupOrders(cleanYears*365);
+                          setCleanBusy(false); setCleanConfirm(false); setCleanBackedUp(false);
+                          if(!r) showToast("⚠ Couldn't reach the database — nothing was deleted","error");
+                          else if(r.refused) showToast(`Deleted ${r.done} · ${r.refused} refused by the database and kept`,"error");
+                          else showToast(`✓ Deleted ${r.done} old order${r.done!==1?"s":""}`);
+                        }}
+                          style={{background:C.danger,color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>{cleanBusy?"Deleting…":"Yes, delete"}</button>
+                      </div>
+                    </div>
+                  )}
+                  </>)}
+              </div>
+            );
+          })()}
 
           {/* Speed up the storefront — migrate product photos to the fast catalog model */}
           {(()=>{
@@ -19184,6 +19266,17 @@ function NemoStore(){
       if(ev) sendCustomerEmail(updated, settings, ev);
     }
   };
+  /* The ONLY place the app removes an order. It deletes nothing orderCleanupEligible rejects,
+     and the database rules check the same things again, so a refusal is counted and reported
+     rather than swallowed. The admin listener drops the deleted rows from the list by itself. */
+  const cleanupOldOrders=async days=>{
+    if(!FB_OK||!FB_DB) return null;
+    let done=0, refused=0;
+    for(const o of orders.filter(x=>orderCleanupEligible(x,days))){
+      try{ await FB_DB.ref("orders/"+o.userUid+"/"+o.id).remove(); done++; }catch(e){ refused++; }
+    }
+    return {done,refused};
+  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -19937,7 +20030,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

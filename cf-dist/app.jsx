@@ -257,6 +257,25 @@ function adminOrderNeedsAttention(o){
   const doaOpen=!!o.doa&&!doa.startsWith("Approved")&&doa!=="Declined";
   return returnOpen||doaOpen;
 }
+/* Which orders "Clean Up Old Orders" may delete. Orders are GST records, so this is narrow on
+   purpose: finished (Delivered or Cancelled), nothing still open on it (a return, a DOA claim,
+   a refund owed), and at least a year old however the admin sets the picker.
+
+   Age is read from paymentDeadline as well as placedAt because the database rules can only
+   compare numbers: placedAt is an ISO string, while paymentDeadline is a millisecond time set
+   once at placement (20 minutes after it) and pinned by the rules. Requiring both keeps this
+   filter at least as strict as the rule, so the button never offers an order the database
+   would refuse. An order without a paymentDeadline predates it and is simply kept. */
+const ORDER_CLEANUP_MIN_DAYS = 365;
+function orderCleanupEligible(o, days, now=Date.now()){
+  if(!o||!o.id||!o.userUid) return false;
+  if(o.status!=="Delivered"&&o.status!=="Cancelled") return false;
+  if(adminOrderNeedsAttention(o)) return false;
+  if(o.refund&&o.refund.due&&o.refund.status!=="refunded") return false;
+  const cutoff=now-Math.max(ORDER_CLEANUP_MIN_DAYS,Number(days)||0)*86400000;
+  const placed=new Date(o.placedAt||0).getTime();
+  return typeof o.paymentDeadline==="number" && o.paymentDeadline<cutoff && placed>0 && placed<cutoff;
+}
 function adminOrderStage(o,now=Date.now()){
   if(adminOrderNeedsAttention(o)) return "Return/Replacement";
   if(orderIsPast(o,now)) return "Past Orders";
@@ -8339,7 +8358,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.46538167";
+const APP_BUILD = "v90.4afb1f6e";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -14763,6 +14782,17 @@ function NemoStore(){
       if(ev) sendCustomerEmail(updated, settings, ev);
     }
   };
+  /* The ONLY place the app removes an order. It deletes nothing orderCleanupEligible rejects,
+     and the database rules check the same things again, so a refusal is counted and reported
+     rather than swallowed. The admin listener drops the deleted rows from the list by itself. */
+  const cleanupOldOrders=async days=>{
+    if(!FB_OK||!FB_DB) return null;
+    let done=0, refused=0;
+    for(const o of orders.filter(x=>orderCleanupEligible(x,days))){
+      try{ await FB_DB.ref("orders/"+o.userUid+"/"+o.id).remove(); done++; }catch(e){ refused++; }
+    }
+    return {done,refused};
+  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -15517,7 +15547,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}
