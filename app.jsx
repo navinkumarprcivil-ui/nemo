@@ -6212,12 +6212,16 @@ function OfflineBar(){
   },[]);
   if(!off) return null;
   return(
+    /* Kept to a strip. It sits over the header rather than pushing the page down — reflowing
+       the whole layout every time a lift or a train takes the signal would be worse than
+       covering something — so every pixel it takes is a pixel of the store it hides. At 12px
+       with 9px of padding it was eating the coin balance and the avatar. */
     <div role="status" aria-live="polite"
       style={{position:"fixed",top:0,left:0,right:0,zIndex:9300,background:"#0f172a",color:"white",
-        paddingTop:"calc(env(safe-area-inset-top, 0px) + 9px)",paddingBottom:9,paddingLeft:16,paddingRight:16,
-        fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:12,fontWeight:700,textAlign:"center",
-        lineHeight:1.4,boxShadow:"0 6px 20px rgba(15,23,42,.35)"}}>
-      No internet — connect to see photos and place an order
+        paddingTop:"calc(env(safe-area-inset-top, 0px) + 5px)",paddingBottom:5,paddingLeft:14,paddingRight:14,
+        fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:11,fontWeight:700,textAlign:"center",
+        lineHeight:1.35,boxShadow:"0 4px 14px rgba(15,23,42,.3)"}}>
+      No internet — connect to see photos and order
     </div>
   );
 }
