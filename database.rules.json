@@ -342,14 +342,6 @@
         }
       }
     },
-    "tankApprovedDays": {
-      "$month": {
-        "$uid": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2')",
-          ".write": "auth != null && auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2'"
-        }
-      }
-    },
     "analytics": {
       ".read": "auth != null && ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/dashboard').val() === true)))",
       "total": {
