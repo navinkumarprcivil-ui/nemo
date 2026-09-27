@@ -8339,7 +8339,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.77460e99";
+const APP_BUILD = "v90.46538167";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
@@ -14763,20 +14763,6 @@ function NemoStore(){
       if(ev) sendCustomerEmail(updated, settings, ev);
     }
   };
-  const deleteOrderHandler=async order=>{
-    setOrders(prev=>prev.filter(o=>o.id!==order.id));
-    // Deleting is an admin action, so the admin's own snapshot is the cache to correct — the
-    // shared customer key is written by the customer's own listener and is not this one.
-    const r=await dbGet(ADMIN_ORDER_CACHE); const arr=r?JSON.parse(r):[]; await dbSet(ADMIN_ORDER_CACHE,JSON.stringify(arr.filter(x=>x.id!==order.id)));
-    // Removing the order also removes its payment screenshot (stored on the order) — frees Firebase space.
-    if(FB_OK&&order.userUid){ try{ await FB_DB.ref("orders/"+order.userUid+"/"+order.id).remove(); }catch(e){} }
-  };
-  const cleanupOldOrders=async months=>{
-    const cutoff=Date.now()-months*30*24*60*60*1000;
-    const old=orders.filter(o=>(o.status==="Delivered"||o.status==="Cancelled") && new Date(o.placedAt||0).getTime()<cutoff);
-    for(const o of old){ await deleteOrderHandler(o); }
-    return old.length;
-  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -15531,7 +15517,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

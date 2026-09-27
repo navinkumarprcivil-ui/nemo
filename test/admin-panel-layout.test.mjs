@@ -55,14 +55,39 @@ test('live-fish packing settings are hidden while live fish are off', () => {
   assert.ok(app.includes('liveFishRestrictNCIndia'), 'the live-fish settings were deleted rather than hidden');
 });
 
-/* The "Go Live — Clear Test Orders" button was removed once the store was trading. It deleted
-   every order regardless of age or status and had no memory of having run, so after the first
-   real sale it would have offered to wipe that sale as a "test order". The owner's rule since
-   then is that nothing is deleted after going live, and orders are GST records. */
-test('there is no button that deletes the whole order book', () => {
-  for (const gone of ['resetAllOrderData', 'onResetOrderData', 'DELETE ALL ORDERS', 'Clear Test Orders']){
+/* No order can be deleted — not by a button, not by the server, not by the database.
+
+   Real, paid, delivered orders placed while the payment gateway was being tested were lost
+   from the admin. Three admin controls could delete orders: "Go Live — Clear Test Orders"
+   (every order, any status, with no memory of having run), "Clean Up Old Orders" (delivered
+   and cancelled orders past an age) and "Delete This Order" on every order. All three are
+   gone, and the database rules now refuse a delete from anyone, admin included, so a
+   control that comes back later still cannot remove an order. Orders are GST records: an
+   order that should not count is Cancelled, never deleted. */
+test('nothing in the app deletes an order', () => {
+  for (const gone of ['resetAllOrderData', 'DELETE ALL ORDERS', 'Clear Test Orders',
+    'Clean Up Old Orders', 'Delete This Order', 'deleteOrderHandler', 'onDeleteOrder', 'onCleanupOrders']){
     assert.ok(!app.includes(gone), `"${gone}" is back in app.jsx`);
   }
-  // Order-number counters are only ever cleared by a reset of this kind.
+  // Any ref into orders/ that is removed or overwritten with null.
+  assert.doesNotMatch(app, /ref\(\s*["'`]orders[^)]*\)\s*\.\s*(remove\(|set\(\s*null)/, 'app.jsx removes an order');
   assert.doesNotMatch(app, /ref\("orderSeq\/"\+[^)]*\)\.remove\(\)/, 'something removes order-number counters');
+});
+
+test('the server never deletes an order', () => {
+  for (const f of ['lib/payments.mjs', 'lib/gateways.mjs', 'cloudflare/worker.js', 'api/cron-push.js', 'api/cron-tank-cleanup.js']){
+    let src = '';
+    try { src = readFileSync(new URL('../' + f, import.meta.url), 'utf8'); } catch { continue; }
+    assert.doesNotMatch(src, /dbDelete\(\s*[`'"]orders/, `${f} deletes an order`);
+  }
+});
+
+test('the database rules refuse to delete an order, even for the admin', () => {
+  const rules = JSON.parse(readFileSync(new URL('../database.rules.json', import.meta.url), 'utf8')).rules;
+  // A write granted higher up cascades down and cannot be taken back, so nothing above may grant one.
+  assert.equal(rules['.write'], false);
+  assert.equal(rules.orders['.write'], undefined, 'orders/ grants a write, which would allow deletes');
+  assert.equal(rules.orders.$uid['.write'], undefined, 'orders/$uid grants a write, which would allow deletes');
+  const w = rules.orders.$uid.$oid['.write'];
+  assert.ok(w.startsWith('auth != null && newData.exists() && ('), `the order write rule does not require newData.exists() for everyone: ${w}`);
 });

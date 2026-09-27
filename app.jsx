@@ -14063,7 +14063,7 @@ function AdminInsights({stats, products=[]}){
 }
 
 /* ═══════════════════ ADMIN ORDER DETAIL (Phase 4) ═══════════════════ */
-function AdminOrderDetail({order:o,onBack,onUpdateOrder,onDeleteOrder,showToast,settings={},products=[],mediaCache={}}){
+function AdminOrderDetail({order:o,onBack,onUpdateOrder,showToast,settings={},products=[],mediaCache={}}){
   const [status,setStatus]=useState(o.status);
   const [tracking,setTracking]=useState(o.trackingNumber||"");
   const [etaDays,setEtaDays]=useState(o.etaDays!=null?o.etaDays:"");
@@ -14080,7 +14080,6 @@ function AdminOrderDetail({order:o,onBack,onUpdateOrder,onDeleteOrder,showToast,
   const [proofZoom,setProofZoom]=useState(false);
   const [saving,setSaving]=useState(false);
   const [rejectConfirm,setRejectConfirm]=useState(false);
-  const [delOrderConfirm,setDelOrderConfirm]=useState(false);
   const amtDue=o.amountDue??(o.total+o.fee);
   // Was money actually collected for this order? (verified payment, a proof, a paid timestamp, or already progressed past payment)
   const paidish=o.paymentStatus==="Verified"||!!o.paidAt||!!o.paymentProof||["Confirmed","Shipped","Delivered"].includes(o.status);
@@ -14884,28 +14883,6 @@ function AdminOrderDetail({order:o,onBack,onUpdateOrder,onDeleteOrder,showToast,
           )}
         </div>}
 
-        {/* Delete this order (also removes its payment screenshot) */}
-        {onDeleteOrder&&(
-          <div style={{marginTop:14}}>
-            {delOrderConfirm?(
-              <div style={{background:"#fef2f2",border:`1.5px solid ${C.danger}`,borderRadius:16,padding:"14px"}}>
-                <div style={{fontSize:13,fontWeight:700,color:C.danger,marginBottom:4,textAlign:"center"}}>Delete order {o.orderNo||orderId(o.id)} permanently?</div>
-                <div style={{fontSize:11,color:"#7f1d1d",marginBottom:10,textAlign:"center",lineHeight:1.5}}>This also removes its payment screenshot and can't be undone.</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <button className="press" onClick={()=>setDelOrderConfirm(false)}
-                    style={{background:"white",color:C.text,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>Cancel</button>
-                  <button className="press" onClick={()=>{setDelOrderConfirm(false);onDeleteOrder(o);}}
-                    style={{background:C.danger,color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>Yes, delete</button>
-                </div>
-              </div>
-            ):(
-            <button className="press" onClick={()=>setDelOrderConfirm(true)}
-              style={{width:"100%",background:"#fff",color:C.danger,border:`1.5px solid ${C.danger}`,borderRadius:16,padding:"13px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-              🗑 Delete This Order
-            </button>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -14938,7 +14915,7 @@ function AdminExitConfirm({onStay,onLeave}){
 }
 
 /* ═══════════════════ ADMIN HUB (Dashboard + Orders) ═══════════════════ */
-function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onDeleteOrder,onCleanupOrders,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
+function AdminHub({products,orders,mediaCache,requests,guides,settings,interestCounts={},abandonedCarts=[],onDismissAbandoned,onSaveProd,onDeleteProd,onUpdateOrder,onBackfillThumbs,onDeleteRequest,onPurgeUser,onSaveGuide,onDeleteGuide,onDeleteGuides,onSaveSettings,onReviewsChanged,onBack,showToast,onAdminSignIn,showcase=[],onDeleteShowcase,onApproveShowcase,onTankMonthlyAward,totmVotes={},tankMonthKey=totmMonthOf(Date.now()),testimonials=[],onDeleteTestimonial,backRef}){
   const [tab,setTab]=useState("orders"); // orders | products | reviews | requests | guides | settings | form | orderDetail
   const showcaseActionRef=useRef(new Set());
   const [showcaseAction,setShowcaseAction]=useState({});
@@ -15017,8 +14994,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
     };
     return ()=>{ backRef.current=null; };
   },[backRef,tab]);
-  const [cleanMonths,setCleanMonths]=useState(6);
-  const [cleanConfirm,setCleanConfirm]=useState(false);
   const [thumbBusy,setThumbBusy]=useState(false);
   const [thumbMsg,setThumbMsg]=useState("");
   const [visitStats,setVisitStats]=useState(null);
@@ -15192,7 +15167,7 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
   if(tab==="orderDetail"&&viewOrder)return(
     <AdminOrderDetail order={viewOrder} showToast={showToast} settings={settings}
       products={products} mediaCache={mediaCache}
-      onBack={()=>setTab("orders")} onDeleteOrder={async(ord)=>{await onDeleteOrder(ord);setViewOrder(null);setTab("orders");showToast("Order deleted");}}
+      onBack={()=>setTab("orders")}
       onUpdateOrder={async(updated)=>{await onUpdateOrder(updated);setViewOrder(updated);}}/>
   );
 
@@ -15503,54 +15478,6 @@ function AdminHub({products,orders,mediaCache,requests,guides,settings,interestC
             <div style={{fontSize:10,color:C.textSub,lineHeight:1.5,marginTop:8}}>
               The orders sheet marks each row <b>Counts for GST</b>. Cancelled and unpaid orders are excluded from the tax columns, so the totals you file don't include them. Every sheet also carries full <b>ISO date</b> columns for reporting tools — the short dates on screen have no year.
             </div>
-          </div>
-
-          {/* Clean up old orders — frees Firebase space (also removes their payment screenshots) */}
-          <div style={{background:C.card,borderRadius:16,padding:"14px",marginBottom:14,border:`1px solid ${C.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <span style={{fontSize:16}}>🧹</span>
-              <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:800,color:C.text}}>Clean Up Old Orders</span>
-            </div>
-            <div style={{fontSize:11,color:C.textSub,marginBottom:10,lineHeight:1.5}}>Permanently deletes <b>Delivered</b> &amp; <b>Cancelled</b> orders (and their payment screenshots) older than the chosen age — frees Firebase space. Active &amp; recent orders are kept. 💡 Download a backup first (Settings → Data &amp; Backup).</div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <select value={cleanMonths} onChange={e=>{setCleanMonths(Number(e.target.value));setCleanConfirm(false);}}
-                style={{flexShrink:0,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"10px",fontSize:12,background:"white",fontFamily:"'Plus Jakarta Sans',sans-serif",color:C.text}}>
-                <option value={3}>Older than 3 months</option>
-                <option value={6}>Older than 6 months</option>
-                <option value={12}>Older than 1 year</option>
-              </select>
-              <button className="press" onClick={()=>{
-                const cutoff=Date.now()-cleanMonths*30*24*60*60*1000;
-                const due=orders.filter(o=>(o.status==="Delivered"||o.status==="Cancelled")&&new Date(o.placedAt||0).getTime()<cutoff).length;
-                if(!due){ showToast("No old orders to delete","error"); return; }
-                setCleanConfirm(true);
-              }}
-                style={{flex:1,background:"#b91c1c",color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:12,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
-                🗑 Delete Old Orders
-              </button>
-            </div>
-            {cleanConfirm&&(()=>{
-              const cutoff=Date.now()-cleanMonths*30*24*60*60*1000;
-              const due=orders.filter(o=>(o.status==="Delivered"||o.status==="Cancelled")&&new Date(o.placedAt||0).getTime()<cutoff).length;
-              return(
-                <div style={{marginTop:10,background:"#fef2f2",border:`1.5px solid ${C.danger}`,borderRadius:12,padding:"12px"}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.danger,marginBottom:4,lineHeight:1.5}}>⚠ Take a backup first — permanently delete {due} delivered/cancelled order{due!==1?"s":""} older than {cleanMonths} months?</div>
-                  <div style={{fontSize:11,color:"#7f1d1d",marginBottom:10,lineHeight:1.5}}>This also removes their payment screenshots and <b>cannot be undone</b>. Your automatic <b>Google Drive backup</b> already keeps these (it updates daily) — but download a copy now to be safe.</div>
-                  <button className="press" onClick={()=>{ const n=exportOrdersCSV(orders,"","",settings,walletBalances); stampExport(); showToast(n?`Backed up ${n} order${n!==1?"s":""} ✓`:"No orders to back up"); }}
-                    style={{width:"100%",marginBottom:8,background:"#107c41",color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:12,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>⬇ Download backup now (all orders)</button>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <button className="press" onClick={()=>setCleanConfirm(false)}
-                      style={{background:"white",color:C.text,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>Cancel</button>
-                    <button className="press" onClick={async()=>{
-                      setCleanConfirm(false);
-                      const n=await onCleanupOrders(cleanMonths);
-                      showToast(n?`Deleted ${n} old order${n!==1?"s":""} ✓`:"Nothing deleted");
-                    }}
-                      style={{background:C.danger,color:"white",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,fontFamily:"'Plus Jakarta Sans',sans-serif"}}>Yes, delete</button>
-                  </div>
-                </div>
-              );
-            })()}
           </div>
 
           {/* Speed up the storefront — migrate product photos to the fast catalog model */}
@@ -19257,20 +19184,6 @@ function NemoStore(){
       if(ev) sendCustomerEmail(updated, settings, ev);
     }
   };
-  const deleteOrderHandler=async order=>{
-    setOrders(prev=>prev.filter(o=>o.id!==order.id));
-    // Deleting is an admin action, so the admin's own snapshot is the cache to correct — the
-    // shared customer key is written by the customer's own listener and is not this one.
-    const r=await dbGet(ADMIN_ORDER_CACHE); const arr=r?JSON.parse(r):[]; await dbSet(ADMIN_ORDER_CACHE,JSON.stringify(arr.filter(x=>x.id!==order.id)));
-    // Removing the order also removes its payment screenshot (stored on the order) — frees Firebase space.
-    if(FB_OK&&order.userUid){ try{ await FB_DB.ref("orders/"+order.userUid+"/"+order.id).remove(); }catch(e){} }
-  };
-  const cleanupOldOrders=async months=>{
-    const cutoff=Date.now()-months*30*24*60*60*1000;
-    const old=orders.filter(o=>(o.status==="Delivered"||o.status==="Cancelled") && new Date(o.placedAt||0).getTime()<cutoff);
-    for(const o of old){ await deleteOrderHandler(o); }
-    return old.length;
-  };
   /* Opt-in migration: generate a small catalog thumbnail for every product image that lacks one,
      so the shop grid loads tiny images instead of full-size photos. Works on BOTH plans:
        • Free (no Storage): thumbnails are stored as base64 in the Realtime Database.
@@ -20024,7 +19937,7 @@ function NemoStore(){
         {typeof page==="string"&&page.indexOf("policy-")===0&&<PolicyPage nav={nav} goBack={goBack} settings={settings} which={page.slice(7)}/>}
         {page==="admin-login"&&<AdminLogin onSuccess={()=>nav("admin")} onBack={goBack} onAdminSignIn={adminGoogleSignIn} settings={settings}/>}
         {page==="admin"   &&<AdminHub products={products} orders={orders} requests={requests} guides={guides} settings={settings} interestCounts={interestCounts} mediaCache={mediaCache} showToast={showToast} abandonedCarts={abandonedCarts} onDismissAbandoned={dismissAbandoned} showcase={showcase} onDeleteShowcase={handleDeleteShowcase} onApproveShowcase={handleApproveShowcase} onTankMonthlyAward={handleTankMonthlyAward} totmVotes={totmVotes} tankMonthKey={activeTankMonth} testimonials={testimonials} onDeleteTestimonial={handleDeleteTestimonial}
-          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onDeleteOrder={deleteOrderHandler} onCleanupOrders={cleanupOldOrders} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
+          onSaveProd={saveProdHandler} onDeleteProd={deleteProdHandler} onUpdateOrder={updateOrderHandler} onBackfillThumbs={backfillThumbs} onDeleteRequest={deleteRequest} onPurgeUser={purgeUserForAdmin} onSaveGuide={saveGuideHandler} onDeleteGuide={deleteGuideHandler} onDeleteGuides={deleteGuidesHandler} onSaveSettings={saveSettingsHandler} onReviewsChanged={recomputeProductRating} onBack={()=>nav("home")} onAdminSignIn={adminGoogleSignIn} backRef={adminBackRef}/>}
         </div>
       </div>
       {/* Floating cart bar — Zepto-style: free-delivery nudge + cart chip, opens the mini-cart */}

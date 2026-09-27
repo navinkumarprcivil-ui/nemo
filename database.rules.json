@@ -171,7 +171,7 @@
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && (root.child('adminAccess/permissions/orders').val() === true || root.child('adminAccess/permissions/dashboard').val() === true)))))",
         "$oid": {
-          ".write": "auth != null && ( ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true))) || (auth.uid === $uid && newData.exists()) )",
+          ".write": "auth != null && newData.exists() && ( ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true))) || auth.uid === $uid )",
           "id": {
             ".validate": "(auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && root.child('adminAccess/permissions/orders').val() === true)) || !data.exists() || newData.val() === data.val()"
           },

@@ -38,6 +38,29 @@ review naming an old phone is the signal to start building 17 rather than to wai
 
 ---
 
+## Now — publish the rules that make orders undeletable
+
+`database.rules.json` changed on 27 September 2026: the write rule on `orders/$uid/$oid` now starts
+`auth != null && newData.exists() &&`, so **nobody can delete an order — not a customer, not the
+admin, not a co-admin**. The same day the three admin controls that deleted orders were removed
+(Go Live — Clear Test Orders, Clean Up Old Orders, Delete This Order), after real, paid, delivered
+orders from the gateway-testing period went missing from the admin.
+
+**The repo copy does nothing until it is published.** Firebase Console → Realtime Database →
+**Rules** → paste the whole file → **Publish**.
+
+**What the answer should be:** in the Rules tab, the `"$oid"` block's `.write` begins with
+`auth != null && newData.exists() &&`. Placing an order, paying, and moving an order through
+Confirmed → Shipped → Delivered all keep working, because each of those writes data rather than
+removing it.
+
+**If it is wrong:** an order that should not count is **Cancelled**, never deleted — cancelling
+writes a status, so the rule allows it. If a future feature genuinely needs to remove an order, the
+test `the database rules refuse to delete an order` in `test/admin-panel-layout.test.mjs` will fail
+first; that is the point at which to decide, not after.
+
+---
+
 ## Settled — 27 September 2026
 
 **The WELCOME100 flash is gone.** Confirmed after `80346e2` with the day key cleared, so the popup
