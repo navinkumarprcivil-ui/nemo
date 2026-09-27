@@ -30,6 +30,12 @@
       ".read": true,
       ".write": "auth != null && ((auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (auth.uid === root.child('adminAccess/coAdminUid').val() && (root.child('adminAccess/permissions/products').val() === true || root.child('adminAccess/permissions/guides').val() === true))))"
     },
+    "tankMedia": {
+      ".read": true,
+      "$id": {
+        ".write": "auth != null && ( auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || (!data.exists() && newData.isString() && newData.val().length <= 100000 && root.child('showcase/' + $id + '/userUid').val() === auth.uid) || (!newData.exists() && (auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2' || root.child('showcase/' + $id + '/userUid').val() === auth.uid || !root.child('showcase/' + $id).exists())) )"
+      }
+    },
     "settingsPrivate": {
       ".read": "auth != null && (auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2')",
       ".write": "auth != null && (auth.uid === 'cI2HmMt6FdR7fO7uUnugH85GeZt2')"

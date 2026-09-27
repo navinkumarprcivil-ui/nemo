@@ -190,6 +190,61 @@ function imageBytes(dataUrl) {
   }
 }
 
+/* A customer's tank photo, served the same way a product photo is.
+
+   These used to ride inside the `showcase` record as base64, in a node every visitor subscribes
+   to on boot — so each live photo cost its full size to every visitor on every cold start, and
+   the free plan's 10 GB/month is what stands between this shop and being cut off. Now the record
+   carries only this URL and the bytes sit in `tankMedia/<id>`, read through here: once per key per
+   hour per edge, cached, shared by everyone. The bill stops scaling with the number of visitors.
+
+   No CDN branch, unlike /share-image/ — a tank photo lives 24 hours and never reaches the
+   repository, so the database is the only place it can come from. */
+async function tankImageResponse(request, url, tankId) {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(tankId)) {
+    return new Response('Not found', {
+      status: 404,
+      headers: { ...securityHeaders, 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+
+  try {
+    const dbResponse = await fetch(
+      `${MEDIA_DB}/tankMedia/${encodeURIComponent(tankId)}.json`,
+      { cf: { cacheTtl: 3600, cacheEverything: true } }
+    );
+    if (dbResponse.ok) {
+      const stored = await dbResponse.json();
+      const decoded = imageBytes(stored);
+      if (decoded) {
+        return new Response(request.method === 'HEAD' ? null : decoded.bytes, {
+          status: 200,
+          headers: {
+            ...securityHeaders,
+            'Content-Type': decoded.type,
+            'Content-Length': String(decoded.bytes.byteLength),
+            'Content-Disposition': 'inline',
+            // A tank photo is immutable for its whole 24-hour life, so it can be cached hard.
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+    }
+  } catch {
+    // Fall through to the placeholder below.
+  }
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      ...securityHeaders,
+      Location: `${SITE}/assets/share-banner.jpg`,
+      'Cache-Control': 'public, max-age=300, s-maxage=300',
+    },
+  });
+}
+
 async function shareImageResponse(request, url, mediaKey) {
   if (!/^[A-Za-z0-9_-]{1,96}$/.test(mediaKey)) {
     return new Response('Not found', {
@@ -391,6 +446,13 @@ export default {
     if (url.hostname === 'nemoaquastore.in') return redirectApex(url);
 
     const path = url.pathname.replace(/\/+$/, '') || '/';
+
+    if (path.startsWith('/tank-image/')) {
+      let tankId = '';
+      try { tankId = decodeURIComponent(path.slice('/tank-image/'.length)); }
+      catch { return new Response('Not found', { status: 404 }); }
+      return tankImageResponse(request, url, tankId);
+    }
 
     if (path.startsWith('/share-image/')) {
       let mediaKey = '';

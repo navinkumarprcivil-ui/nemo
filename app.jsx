@@ -2164,7 +2164,7 @@ function compressImage(file, maxDim=1100, quality=0.82){
    hundred pixels wide. 200,000 characters is about 150 KB and still comfortably sharper than the
    card it is drawn in. The rules keep their own larger ceiling as a backstop against a client
    that ignores this one. */
-const MAX_TANK_IMAGE_CHARS=200000;
+const MAX_TANK_IMAGE_CHARS=70000;
 async function compressTankImage(file){
   let latest="";
   for(const [maxDim,quality] of [[900,.74],[780,.66],[660,.58]]){
@@ -3136,6 +3136,10 @@ async function redeemPoints(uid, pts, redemptionId){
 /* ── Customer Tank Showcase ── */
 const SHOWCASE_TTL = 24*60*60*1000; // photos auto-expire 24h AFTER admin approval (when expiresAt is set)
 const SHOWCASE_PENDING_TTL = 24*60*60*1000; // unapproved customer tank requests are removed after 24h
+/* How many approved tanks the public gallery shows at once. A ceiling rather than a guess at
+   demand: without one, a good week puts every live tank on one screen and the page grows without
+   limit. Ranked entries above this line are the ones shown. */
+const MAX_LIVE_TANKS = 12;
 const IST_OFFSET_MS=5.5*60*60*1000;
 function istDayKey(ms){ return new Date((ms==null?Date.now():ms)+IST_OFFSET_MS).toISOString().slice(0,10); }
 /* ── Tank of the Month ─────────────────────────────────────────────────────────
@@ -3348,7 +3352,10 @@ async function loadShowcase(){
   // expire 24h after submission. Filter them immediately even if a cloud delete is
   // temporarily denied/offline, so stale requests never remain visible in the app.
   const expired=arr.filter(x=>showcaseExpired(x,now)||showcasePendingExpired(x,now));
-  if(FB_OK){ expired.forEach(x=>{ FB_DB.ref("showcase/"+x.id).remove().catch(()=>{}); }); }
+  if(FB_OK){ expired.forEach(x=>{
+    // Record first, bytes second — see deleteShowcasePhoto for why the order is the rule.
+    FB_DB.ref("showcase/"+x.id).remove().then(()=>delTankMedia(x.id)).catch(()=>{});
+  }); }
   const expiredIds=new Set(expired.map(x=>x&&x.id).filter(Boolean));
   const live=arr.filter(x=>x&&!expiredIds.has(x.id)).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
   // Keep the offline copy honest too, so the next cold start can't revive a deleted photo either.
@@ -3380,17 +3387,42 @@ function scheduleShowcaseCacheWrite(item){
   if(typeof requestIdleCallback==="function") requestIdleCallback(()=>{ void work(); },{timeout:1200});
   else setTimeout(()=>{ void work(); },0);
 }
+/* Where a tank photo's bytes are read from. The Worker serves tankMedia/<id> and caches the
+   answer at the edge for an hour, so one photo costs one database read per hour shared by every
+   visitor — instead of its full size to every visitor on every cold start, which is what riding
+   inside the `showcase` record used to cost. See tankImageResponse in cloudflare/worker.js. */
+function tankImagePath(id){ return id?("/tank-image/"+encodeURIComponent(id)):null; }
+async function delTankMedia(id){
+  if(!FB_OK||!id) return;
+  try{ await FB_DB.ref("tankMedia/"+id).remove(); }catch(e){}
+}
 async function addShowcasePhoto(item){
-  /* Firebase is the upload. The offline cache is only a convenience and must never block it:
-     large base64 photos can fill or slow IndexedDB on Android devices. */
+  /* Firebase is the upload. The offline cache is only a convenience and must never block it. */
   if(!FB_OK) return false;
+  const bytes=item&&item.imgData;
+  // The record carries the URL; the bytes go to their own node. This order is required, not a
+  // preference: the rule on tankMedia/<id> asks whether showcase/<id> already names this
+  // customer, so the record has to land first or the write is refused.
+  const record={...item, imgData:tankImagePath(item.id)};
   try{
-    await FB_DB.ref("showcase/"+item.id).set(item);
+    await FB_DB.ref("showcase/"+item.id).set(record);
   }catch(e){
     console.warn("customer tank upload",e&&((e.code)||e.message)||e);
     return false;
   }
-  scheduleShowcaseCacheWrite(item);
+  if(typeof bytes==="string"&&bytes.startsWith("data:")){
+    try{
+      await FB_DB.ref("tankMedia/"+item.id).set(bytes);
+    }catch(e){
+      /* A record pointing at bytes that never arrived would show the fallback banner for a whole
+         day and read as a broken upload. Take the record back out and report the failure, so the
+         customer's retry starts from nothing rather than from half a submission. */
+      try{ await FB_DB.ref("showcase/"+item.id).remove(); }catch(e2){}
+      console.warn("customer tank bytes",e&&((e.code)||e.message)||e);
+      return false;
+    }
+  }
+  scheduleShowcaseCacheWrite(record);
   return true;
 }
 /* Approval always starts one 24-hour window. Voting and the optional monthly board never extend
@@ -3411,7 +3443,7 @@ async function approveShowcasePhoto(item,settings,showcase){
         ["showcase/"+item.id]:updated,
         ["tankMonthlyEntries/"+month+"/"+item.id]:history,
       };
-      if(replaced) writes["showcase/"+replaced.id]=null;
+      if(replaced){ writes["showcase/"+replaced.id]=null; writes["tankMedia/"+replaced.id]=null; }
       const uploadedAt=Date.parse(item.createdAt)||now, uploadDay=totmDayOf(uploadedAt), uploadMonth=uploadDay.slice(0,7);
       writes["tankApprovedDays/"+uploadMonth+"/"+item.userUid+"/"+uploadDay]={entryId:item.id,at:uploadedAt,approvedAt:now,ownerName:item.ownerName||"Aquarist"};
       await FB_DB.ref().update(writes);
@@ -3445,6 +3477,9 @@ function scheduleShowcaseCacheRemoval(id){
 }
 async function deleteShowcasePhoto(id){
   if(FB_OK){ try{ await FB_DB.ref("showcase/"+id).remove(); }catch(e){ return false; } }
+  // Second, and after the record: with showcase/<id> gone the rule lets any signed-in client
+  // clear the orphan, which is what makes the expiry sweep below work for other people's photos.
+  await delTankMedia(id);
   scheduleShowcaseCacheRemoval(id);
   return true;
 }
@@ -3591,7 +3626,10 @@ async function purgeUserCloudData(ukey){
   // Tank-showcase photos this user posted (matched by userUid)
   try{
     const s=await withTimeout(FB_DB.ref("showcase").get(),6000); const v=s&&s.val();
-    if(v){ for(const k of Object.keys(v)){ if(v[k] && v[k].userUid===ukey){ try{ await FB_DB.ref("showcase/"+k).remove(); }catch(e){} } } }
+    if(v){ for(const k of Object.keys(v)){ if(v[k] && v[k].userUid===ukey){
+      try{ await FB_DB.ref("showcase/"+k).remove(); }catch(e){}
+      await delTankMedia(k);   // the photo itself, which lives in its own node
+    } } }
   }catch(e){}
   /* Their name in the visitor log. The log node itself is admin-read-only, so this deletes
      by known path rather than by searching: the retained window is short and its day keys
@@ -6398,7 +6436,12 @@ function TankShowcaseSection({showcase,user,settings,onSubmit,onVote,votes={},pr
   const anyReward=contest||streakReward;
   const month=totmMonthOf(now);
   const liveShowcase=(showcase||[]).filter(s=>showcaseApproved(s)&&!showcaseExpired(s,now));
-  const ranked=contest?totmStandings(liveShowcase,month,votes):liveShowcase;
+  /* Ranked first, then capped, so when more tanks are live than the gallery shows it is the
+     highest-voted ones that make the cut rather than whichever arrived first. A customer's own
+     status is read from `showcase` and not from here, so nobody loses sight of their own
+     submission by falling below the line. The cap bounds what one screen fetches and draws — the
+     download itself is bounded by the Worker now (see tankImagePath), not by this. */
+  const ranked=(contest?totmStandings(liveShowcase,month,votes):liveShowcase).slice(0,MAX_LIVE_TANKS);
   const moveFullTank=dir=>{
     if(!fullImg||ranked.length<2) return;
     const idx=ranked.findIndex(entry=>entry.id===fullImg.id);
