@@ -1,11 +1,42 @@
 # Open checks — things that are done but not yet confirmed
 
 Written 27 September 2026, at the end of the session that shipped version code 16 and the
-`--safe-b` fix. Everything here is **work that is already deployed**. What is missing in each case
+`--safe-b` fix, and updated the same day when 16 went for production review. Everything here is **work that is already deployed**. What is missing in each case
 is an observation that can only be made later, or on a device, or by Google — not more code.
 
 Each item says what to look at, where, and what the answer should be. When one is settled, delete
 it; when it is settled *wrongly*, the "if it is wrong" line says where the cause will be.
+
+---
+
+## Now — the production rollout of version 16
+
+Submitted for review on 27 September 2026 as a **20% staged rollout**, promoted straight from
+internal testing. Production had been on 14 (2.0.3) since before the navigation-bar fix existed, so
+every device on it still has the bar sitting over the system buttons.
+
+**Check after review clears, usually a few hours to a day:** Play Console → **Production →
+Releases**. The status moves *In review* → *Available to 20% of users*. Nothing to do but confirm it
+went out.
+
+**Check on days 1 and 2:** Play Console → **Quality → Android vitals → Crashes and ANRs**, filtered
+to version code 16. The number that matters is **crash-free sessions**; compare it against 14 over
+the same window rather than against 100%, because the baseline is not perfect either. Also glance at
+**Ratings and reviews** — a layout regression shows up there before it shows up in vitals, since a
+misplaced bar is not a crash.
+
+**Then:** if both look like 14 did, raise the rollout — 50%, then 100%. There is no need to rush it
+and no prize for finishing in a day.
+
+**If it is wrong:** halt the rollout from the release's ⋮ menu. Halting stops new devices from
+getting it; **it does not take it back from devices that already updated**, so the 20% is the actual
+safety margin and the halt button is only damage control. A fix then ships as version code 17 — a
+bundle that has been rolled out can never be re-uploaded under the same version code.
+
+**Where the risk actually is:** `minSdk` is 24 and the inset handling has only ever run on API 33 to
+36. `tappableElement()` is API 29+ and below that `WindowInsetsCompat` should fall back to
+`systemBars()`. If 16 misbehaves anywhere, an old Android version is the first place to look — see
+*API 24 to 28* below.
 
 ---
 
@@ -111,6 +142,13 @@ strip `libdatastore_shared_counter.so`.
 
 The top edge still shows the window background against the page's white. Same underlying cause the
 navigation bar had, other edge, not yet fixed. Also listed in `docs/ANDROID.md`.
+
+### The six test guides
+
+`9`, `10`, `11`, `12`, `test` and `fish-comp` are still live guides. Delete them from the admin when
+convenient — the sitemap regenerates from the database, so they leave it on their own and no code
+change is involved. Nothing breaks if they stay; they will simply sit in Google's *Crawled –
+currently not indexed* bucket forever.
 
 ### API 24 to 28
 
