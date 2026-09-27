@@ -6160,10 +6160,17 @@ function PlayAppBlock({medium,note,style,headingStyle,noteStyle,badgeStyle}){
   );
 }
 /* Image that fades in once decoded (no abrupt pop). Falls back instantly for cached/data-URI images. */
+/* key={src} is load-bearing rather than tidiness. Without it React reuses the one <img> element
+   when src changes — and a browser goes on painting the PREVIOUS bitmap until the new one has
+   decoded. Tapping a product under "Goes well with" therefore opened its page showing the photo
+   of the product you came from, at full opacity, for as long as the real one took to arrive:
+   data-loaded is set imperatively on the element, so on a reused node it is still "1" and the
+   fade never starts from nothing. A new key makes React mount a fresh element instead, which is
+   empty until its own photo lands. Blank for a moment is honest; the wrong product is not. */
 function SmoothImg({src,alt,style,className,loading="lazy"}){
   const onReady=(el)=>{ if(el){ if(el.complete && el.naturalWidth>0) el.setAttribute("data-loaded","1"); } };
   return (
-    <img src={src} alt={alt||""} ref={onReady} decoding="async" loading={loading}
+    <img key={src} src={src} alt={alt||""} ref={onReady} decoding="async" loading={loading}
       className={"smooth-img"+(className?(" "+className):"")} style={style}
       onLoad={e=>e.currentTarget.setAttribute("data-loaded","1")}
       onError={e=>e.currentTarget.setAttribute("data-loaded","1")}/>
@@ -8359,7 +8366,7 @@ function ProductCard({product:p,imgSrc,onPress,onAdd,inCart=0,isFav=false,onFav,
    orders and favourites are deliberately left alone; only cached copies of data
    that lives on the server are removed, and those come straight back on boot. */
 /* Written by scripts/build.mjs into version.json and sw.js — bump it here only. */
-const APP_BUILD = "v90.cd00ec6b";
+const APP_BUILD = "v90.888c1ba9";
 async function forceRefresh(){
   /* The cached copies of products, guides and settings are deliberately NOT deleted here.
      They used to be, on the reasoning that "those come straight back on boot" — which is true
