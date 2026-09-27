@@ -97,16 +97,22 @@ test("Android WebView clears legacy Customer Tank cache after a successful cloud
 });
 
 test("the rules bound what a client can store, not just what the app sends",()=>{
-  /* The client caps itself at 200,000 characters and writes one photo. Nothing stops a client
-     that ignores the app: the rules previously allowed 700,000 per image and ANY number of
-     images per entry, so one crafted write could put megabytes into a node every visitor
-     downloads — and on the free plan the download allowance is what keeps the shop online.
-     The ceilings here are the backstop, set above the client's own budget so an honest upload
-     is never rejected for being a few bytes over. */
+  /* Nothing stops a client that ignores the app, and `showcase` is world-readable — on the free
+     plan the download allowance is what keeps the shop online, so a crafted write parking
+     megabytes there is a bill, not just untidy data.
+
+     imgData no longer holds an image. addShowcasePhoto writes tankImagePath(id), about fifty
+     characters, and sends the bytes to tankMedia/<id>, which carries its own 100,000-character
+     ceiling. So the backstop here is sized for a path, not a photo: 200 is four times the
+     longest value the code can produce and far below anything worth storing.
+
+     imgs is not written at all any more, and gets the same ceiling for the same reason. */
   const entry=rules.showcase.$id;
-  assert.match(entry.imgData[".validate"],/length <= 260000/);
+  assert.match(entry.imgData[".validate"],/length <= 200\b/);
   assert.match(entry.imgs[".validate"],/!newData\.child\('1'\)\.exists\(\)/);
-  assert.match(entry.imgs.$i[".validate"],/length <= 260000/);
+  assert.match(entry.imgs.$i[".validate"],/length <= 200\b/);
+  // The bytes still need room in the node that actually holds them.
+  assert.match(rules.tankMedia.$id[".write"],/length <= 100000/);
   // Deleting an expired entry must stay possible — the sweep depends on it.
   assert.match(entry.imgData[".validate"],/^!newData\.exists\(\) \|\|/);
   assert.match(entry.imgs[".validate"],/^!newData\.exists\(\) \|\|/);
