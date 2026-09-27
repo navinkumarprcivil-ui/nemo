@@ -44,6 +44,15 @@ It is not in `CDN_MEDIA_KEYS`, so every visitor downloads it from the database. 
 harmless; a few dozen rebuilds the problem. **Roughly monthly, or after adding several
 products or guides:**
 
+**Press Admin → Free Database Space → Clear old photo copies FIRST, before step 1.** That button
+deletes the database copy of every image already on the CDN, which leaves `media` holding exactly the
+photos that still need migrating — and step 2 below decodes everything in the export it is given. Run
+the export while the old copies are still there and you re-download all of them, re-compress them at
+quality 60, and upload them back over the `assets/media/` files they came from. Nothing breaks, the
+keys are identical and the list does not change, but every one of those photos loses a generation of
+JPEG quality for no reason. Prune first and the export is the backlog, which is what the rest of this
+routine assumes.
+
 1. Firebase Console → Realtime Database → `media` → ⋮ → **Export JSON**
 2. Decode and shrink the new images (macOS; `sips` is built in, nothing to install):
 
