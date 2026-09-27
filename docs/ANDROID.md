@@ -657,6 +657,34 @@ is. Run `npm run check` before pushing; that is the only gate left.
 The comment in `deploy.yml` was corrected to say so.
 
 
+## What version code 16 carries — and what was verified
+
+Built 27 September 2026 as `versionCode = 16`, `versionName = "2.1.1"`. 3,647,621 bytes. It is a
+correction release: 15 shipped the navigation-bar fix and 15's own fix turned out to need one more
+change, described in full above.
+
+1. **The insets are consumed, not passed on.** `WindowInsetsCompat.CONSUMED` is returned from the
+   inset listener instead of the insets themselves. Without it the bottom bar was counted twice —
+   once as the padding this listener applies, and again by every CSS rule reading `--safe-b`, because
+   a WebView derives `env(safe-area-inset-*)` from the insets *dispatched* to it and not from the
+   padding its parent applied. The nav floated a bar's height above the buttons.
+2. **930 lines of dead code removed**, per the section above.
+
+**Verified on the Play-signed build from internal testing, 27 September 2026.** That is the whole
+point of this step: R8 and the upload key are not in the debug build, so nothing about a debug pass
+carries over on its own. Checked and passing: the bottom navigation in both gesture and 3-button
+modes; Google sign-in; the native share sheet; the WhatsApp hand-off; Print → Save as PDF; the push
+notification with the fish icon; and the payment sheet. Play's release report came back with the
+two edge-to-edge actions gone and only the native-debug-symbols warning left, which is advisory.
+
+### Why the release build had to be checked separately
+
+Not a formality. R8 rewrites the app, and the parts of `MainActivity` the web page reaches are the
+parts a shrinker cannot see the callers of — every `@JavascriptInterface` method is called by name
+from JavaScript, so if a rule ever stops covering one, the failure appears only in a release build
+and only at the moment the page calls it. See *R8, and the two rules that keep the bridge alive*.
+
+
 ## Still open
 
 - `FirebaseMessaging.getInstance().token` compiles with a deprecation warning. It works and is
@@ -674,6 +702,10 @@ The comment in `deploy.yml` was corrected to say so.
   `setWebContentsDebuggingEnabled` — it is not needed, and in a release build it should not be there.
 
 Cleared in 15: the cleartext-traffic attribute, and the notification's small icon.
+
+Items that are *done but not yet observed* — the Search Console wait, the pre-launch report, the
+native debug symbols, the WELCOME100 popup confirmation — live in `docs/OPEN_CHECKS.md` with a date
+against each, so that this list stays about the app's own unfinished work.
 
 ## If the app is ever migrated to a TWA
 
